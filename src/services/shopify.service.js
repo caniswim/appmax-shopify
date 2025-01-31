@@ -17,7 +17,6 @@ class ShopifyService {
     this.processing = false;
     this.lastRequestTime = 0;
     this.minRequestInterval = 500; // 500ms entre requisições (2 por segundo)
-    this.queueTimeout = null;
 
     // Adiciona interceptor para tratar erros
     this.client.interceptors.response.use(
@@ -87,25 +86,21 @@ class ShopifyService {
 
   async enqueueRequest(requestFn) {
     logger.info(`Adicionando requisição à fila. Tamanho atual: ${this.requestQueue.length}`);
-    return new Promise((resolve, reject) => {
+    const promise = new Promise((resolve, reject) => {
       this.requestQueue.push({ 
         requestFn, 
         resolve, 
         reject,
         timestamp: Date.now()
       });
-      
-      // Garante que a fila será processada
-      this.ensureQueueProcessing();
     });
-  }
 
-  ensureQueueProcessing() {
-    if (!this.processing && !this.queueTimeout) {
-      this.queueTimeout = setTimeout(() => {
-        this.processQueue();
-      }, 100); // Inicia o processamento após 100ms se não estiver processando
+    // Se não estiver processando, inicia o processamento
+    if (!this.processing) {
+      this.processQueue();
     }
+
+    return promise;
   }
 
   async processQueue() {
@@ -114,104 +109,73 @@ class ShopifyService {
     }
 
     this.processing = true;
-    this.queueTimeout = null;
-
     logger.info(`Iniciando processamento da fila. Itens: ${this.requestQueue.length}`);
 
-    while (this.requestQueue.length > 0) {
-      const request = this.requestQueue[0]; // Peek no primeiro item sem remover
-      const waitTime = Date.now() - request.timestamp;
-      
-      logger.info(`Processando requisição da fila. Tempo de espera: ${waitTime}ms`);
-
-      try {
-        const result = await this.makeRequest(request.requestFn);
-        this.requestQueue.shift(); // Remove apenas após sucesso
-        request.resolve(result);
-      } catch (error) {
-        if (error.response?.status === 429) {
-          logger.info('Rate limit atingido, aguardando antes de tentar novamente');
-          await new Promise(resolve => setTimeout(resolve, this.minRequestInterval * 2));
-          continue;
-        }
+    try {
+      while (this.requestQueue.length > 0) {
+        const request = this.requestQueue[0];
+        const waitTime = Date.now() - request.timestamp;
         
-        this.requestQueue.shift(); // Remove em caso de erro não recuperável
-        request.reject(error);
+        logger.info(`Processando requisição da fila. Tempo de espera: ${waitTime}ms`);
+
+        try {
+          const result = await this.makeRequest(request.requestFn);
+          this.requestQueue.shift();
+          request.resolve(result);
+        } catch (error) {
+          if (error.response?.status === 429) {
+            logger.info('Rate limit atingido, aguardando antes de tentar novamente');
+            await new Promise(resolve => setTimeout(resolve, this.minRequestInterval * 2));
+            continue;
+          }
+          
+          this.requestQueue.shift();
+          request.reject(error);
+        }
+      }
+    } finally {
+      this.processing = false;
+      logger.info('Processamento da fila concluído');
+
+      // Se ainda houver itens na fila (adicionados durante o processamento)
+      if (this.requestQueue.length > 0) {
+        this.processQueue();
       }
     }
-
-    this.processing = false;
-    logger.info('Processamento da fila concluído');
   }
 
   async createOrUpdateOrder({ appmaxOrder, status, financialStatus }) {
     return this.enqueueRequest(async () => {
       try {
-        // Validação dos dados necessários
         if (!appmaxOrder || !appmaxOrder.bundles) {
           throw new AppError('Dados do pedido Appmax inválidos', 400);
         }
 
-        // Adiciona retry com backoff exponencial para busca
-        let existingOrder = null;
-        let attempts = 0;
-        const maxAttempts = 3;
-        const baseDelay = 1000;
-
-        while (attempts < maxAttempts && !existingOrder) {
-          try {
-            existingOrder = await this.findOrderByAppmaxId(appmaxOrder.id);
-            
-            if (existingOrder) {
-              logger.info(`Pedido Appmax #${appmaxOrder.id} encontrado na Shopify: #${existingOrder.id}`);
-              return this.updateOrder(existingOrder.id, { appmaxOrder, status, financialStatus });
-            }
-
-            if (attempts > 0) {
-              break;
-            }
-          } catch (error) {
-            attempts++;
-            
-            if (attempts === maxAttempts || !this.isRetryableError(error)) {
-              throw error;
-            }
-
-            const delay = baseDelay * Math.pow(2, attempts - 1);
-            logger.info(`Tentativa ${attempts} de buscar pedido falhou, aguardando ${delay}ms antes de tentar novamente`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-          }
+        logger.info(`Verificando existência do pedido Appmax #${appmaxOrder.id}`);
+        const existingOrder = await this.findOrderByAppmaxId(appmaxOrder.id);
+        
+        if (existingOrder) {
+          logger.info(`Pedido Appmax #${appmaxOrder.id} encontrado na Shopify: #${existingOrder.id}`);
+          return this.updateOrder(existingOrder.id, { appmaxOrder, status, financialStatus });
         }
 
         const orderData = this.formatOrderData(appmaxOrder, status, financialStatus);
         logger.info('Criando pedido na Shopify:', orderData);
 
-        attempts = 0;
-        while (attempts < maxAttempts) {
-          try {
-            const { data } = await this.client.post('/orders.json', orderData);
-            return data.order;
-          } catch (error) {
-            attempts++;
-
-            if (error.response?.status === 422 && error.response?.data?.errors?.['customer.email']) {
-              logger.info(`Email duplicado detectado, verificando pedido novamente para Appmax #${appmaxOrder.id}`);
-              existingOrder = await this.findOrderByAppmaxId(appmaxOrder.id);
-              
-              if (existingOrder) {
-                logger.info(`Pedido encontrado após erro de email duplicado, atualizando Appmax #${appmaxOrder.id}`);
-                return this.updateOrder(existingOrder.id, { appmaxOrder, status, financialStatus });
-              }
+        try {
+          const { data } = await this.makeRequest(() => this.client.post('/orders.json', orderData));
+          return data.order;
+        } catch (error) {
+          if (error.response?.status === 422 && error.response?.data?.errors?.['customer.email']) {
+            logger.info(`Email duplicado detectado, verificando pedido novamente para Appmax #${appmaxOrder.id}`);
+            const retryOrder = await this.findOrderByAppmaxId(appmaxOrder.id);
+            
+            if (retryOrder) {
+              logger.info(`Pedido encontrado após erro de email duplicado, atualizando Appmax #${appmaxOrder.id}`);
+              return this.updateOrder(retryOrder.id, { appmaxOrder, status, financialStatus });
             }
-
-            if (attempts === maxAttempts || !this.isRetryableError(error)) {
-              throw error;
-            }
-
-            const delay = baseDelay * Math.pow(2, attempts - 1);
-            logger.info(`Tentativa ${attempts} de criar pedido falhou, aguardando ${delay}ms antes de tentar novamente`);
-            await new Promise(resolve => setTimeout(resolve, delay));
           }
+          throw error;
         }
       } catch (error) {
         if (error instanceof AppError) {
@@ -363,9 +327,9 @@ class ShopifyService {
   }
 
   async findOrderByAppmaxId(appmaxId) {
-    return this.enqueueRequest(async () => {
-      try {
-        const { data } = await this.client.get('/orders.json', {
+    try {
+      const { data } = await this.makeRequest(async () => {
+        return this.client.get('/orders.json', {
           params: {
             status: 'any',
             fields: 'id,note_attributes,financial_status,fulfillment_status',
@@ -373,17 +337,17 @@ class ShopifyService {
             query: `note_attribute:appmax_id:${appmaxId}`
           }
         });
+      });
 
-        return data.orders.find(order => 
-          order.note_attributes.some(attr => 
-            attr.name === 'appmax_id' && attr.value === appmaxId.toString()
-          )
-        );
-      } catch (error) {
-        logger.error('Erro ao buscar pedido na Shopify:', error);
-        throw error;
-      }
-    });
+      return data.orders.find(order => 
+        order.note_attributes.some(attr => 
+          attr.name === 'appmax_id' && attr.value === appmaxId.toString()
+        )
+      );
+    } catch (error) {
+      logger.error('Erro ao buscar pedido na Shopify:', error);
+      throw error;
+    }
   }
 
   async updateOrder(orderId, { appmaxOrder, status, financialStatus }) {
