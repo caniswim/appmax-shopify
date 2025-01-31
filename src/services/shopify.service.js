@@ -24,8 +24,20 @@ class ShopifyService {
             body: error.config.data
           });
           
+          // Trata erros específicos
+          if (data.errors) {
+            const errorMessages = [];
+            Object.entries(data.errors).forEach(([field, messages]) => {
+              errorMessages.push(`${field}: ${messages.join(', ')}`);
+            });
+            throw new AppError(
+              `Erro de validação na Shopify: ${errorMessages.join('; ')}`,
+              status
+            );
+          }
+          
           throw new AppError(
-            `Erro na Shopify: ${JSON.stringify(data.errors)}`,
+            'Erro inesperado na API da Shopify',
             status
           );
         }
@@ -64,8 +76,34 @@ class ShopifyService {
     }
   }
 
+  formatPhoneNumber(phone) {
+    if (!phone) return null;
+    
+    // Remove todos os caracteres não numéricos
+    const numbers = phone.replace(/\D/g, '');
+    
+    // Verifica se é um número brasileiro (com ou sem +55)
+    if (numbers.length === 11 || numbers.length === 13) {
+      // Formato: +55 (XX) XXXXX-XXXX
+      const ddd = numbers.slice(-11, -9);
+      const firstPart = numbers.slice(-9, -4);
+      const lastPart = numbers.slice(-4);
+      return `+55 (${ddd}) ${firstPart}-${lastPart}`;
+    } else if (numbers.length === 10 || numbers.length === 12) {
+      // Formato: +55 (XX) XXXX-XXXX
+      const ddd = numbers.slice(-10, -8);
+      const firstPart = numbers.slice(-8, -4);
+      const lastPart = numbers.slice(-4);
+      return `+55 (${ddd}) ${firstPart}-${lastPart}`;
+    }
+    
+    // Se não conseguir formatar, retorna null
+    return null;
+  }
+
   formatOrderData(appmaxOrder, status, financialStatus) {
     const lineItems = [];
+    const formattedPhone = this.formatPhoneNumber(appmaxOrder.customer.telephone);
 
     if (appmaxOrder.bundles && Array.isArray(appmaxOrder.bundles)) {
       appmaxOrder.bundles.forEach(bundle => {
@@ -94,12 +132,12 @@ class ShopifyService {
       order: {
         line_items: lineItems,
         email: appmaxOrder.customer.email,
-        phone: appmaxOrder.customer.telephone,
+        phone: formattedPhone,
         customer: {
           first_name: appmaxOrder.customer.firstname,
           last_name: appmaxOrder.customer.lastname,
           email: appmaxOrder.customer.email,
-          phone: appmaxOrder.customer.telephone
+          phone: formattedPhone
         },
         shipping_address: {
           first_name: appmaxOrder.customer.firstname,
@@ -110,7 +148,7 @@ class ShopifyService {
           province: appmaxOrder.customer.address_state,
           zip: appmaxOrder.customer.postcode,
           country: 'BR',
-          phone: appmaxOrder.customer.telephone
+          phone: formattedPhone
         },
         billing_address: {
           first_name: appmaxOrder.customer.firstname,
@@ -121,7 +159,7 @@ class ShopifyService {
           province: appmaxOrder.customer.address_state,
           zip: appmaxOrder.customer.postcode,
           country: 'BR',
-          phone: appmaxOrder.customer.telephone
+          phone: formattedPhone
         },
         financial_status: financialStatus,
         fulfillment_status: null,
