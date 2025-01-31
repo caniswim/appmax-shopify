@@ -53,18 +53,71 @@ class ShopifyService {
         throw new AppError('Dados do pedido Appmax inválidos', 400);
       }
 
-      // Verifica se o pedido já existe na Shopify
-      const existingOrder = await this.findOrderByAppmaxId(appmaxOrder.id);
-      
-      if (existingOrder) {
-        return this.updateOrder(existingOrder.id, { appmaxOrder, status, financialStatus });
+      // Adiciona retry com backoff exponencial para busca
+      let existingOrder = null;
+      let attempts = 0;
+      const maxAttempts = 3;
+      const baseDelay = 1000;
+
+      while (attempts < maxAttempts && !existingOrder) {
+        try {
+          existingOrder = await this.findOrderByAppmaxId(appmaxOrder.id);
+          
+          if (existingOrder) {
+            logger.info(`Pedido Appmax #${appmaxOrder.id} encontrado na Shopify: #${existingOrder.id}`);
+            return this.updateOrder(existingOrder.id, { appmaxOrder, status, financialStatus });
+          }
+
+          if (attempts > 0) {
+            // Se não encontrou na segunda ou terceira tentativa, podemos prosseguir para criar
+            break;
+          }
+        } catch (error) {
+          attempts++;
+          
+          if (attempts === maxAttempts || !this.isRetryableError(error)) {
+            throw error;
+          }
+
+          const delay = baseDelay * Math.pow(2, attempts - 1);
+          logger.info(`Tentativa ${attempts} de buscar pedido falhou, aguardando ${delay}ms antes de tentar novamente`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
       }
 
+      // Se chegou aqui, o pedido não existe e podemos criar
       const orderData = this.formatOrderData(appmaxOrder, status, financialStatus);
       logger.info('Criando pedido na Shopify:', orderData);
-      const { data } = await this.client.post('/orders.json', orderData);
-      
-      return data.order;
+
+      // Tenta criar o pedido com retry
+      attempts = 0;
+      while (attempts < maxAttempts) {
+        try {
+          const { data } = await this.client.post('/orders.json', orderData);
+          return data.order;
+        } catch (error) {
+          attempts++;
+
+          // Se o erro for de email duplicado, tenta buscar o pedido novamente
+          if (error.response?.status === 422 && error.response?.data?.errors?.['customer.email']) {
+            logger.info(`Email duplicado detectado, verificando pedido novamente para Appmax #${appmaxOrder.id}`);
+            existingOrder = await this.findOrderByAppmaxId(appmaxOrder.id);
+            
+            if (existingOrder) {
+              logger.info(`Pedido encontrado após erro de email duplicado, atualizando Appmax #${appmaxOrder.id}`);
+              return this.updateOrder(existingOrder.id, { appmaxOrder, status, financialStatus });
+            }
+          }
+
+          if (attempts === maxAttempts || !this.isRetryableError(error)) {
+            throw error;
+          }
+
+          const delay = baseDelay * Math.pow(2, attempts - 1);
+          logger.info(`Tentativa ${attempts} de criar pedido falhou, aguardando ${delay}ms antes de tentar novamente`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
     } catch (error) {
       if (error instanceof AppError) {
         throw error;

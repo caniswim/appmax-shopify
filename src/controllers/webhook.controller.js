@@ -70,6 +70,14 @@ class WebhookController {
         case 'OrderBilletCreated':
           await this.handleOrderBilletCreated(data);
           break;
+
+        case 'OrderPixCreated':
+          await this.handleOrderPixCreated(data);
+          break;
+
+        case 'OrderPaidByPix':
+          await this.handleOrderPaid(data);
+          break;
           
         default:
           logger.info(`Evento não tratado: ${event}`);
@@ -182,6 +190,16 @@ class WebhookController {
     });
     
     logger.info(`Pedido Appmax #${data.id} com boleto criado na Shopify: #${order.id}`);
+  }
+
+  async handleOrderPixCreated(data) {
+    const order = await shopifyService.createOrUpdateOrder({
+      appmaxOrder: data,
+      status: 'pending',
+      financialStatus: 'pending'
+    });
+    
+    logger.info(`Pedido Appmax #${data.id} com Pix criado na Shopify: #${order.id}`);
   }
 }
 
