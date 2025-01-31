@@ -12,6 +12,12 @@ class ShopifyService {
       }
     });
 
+    // Controle de rate limit
+    this.requestQueue = [];
+    this.processing = false;
+    this.lastRequestTime = 0;
+    this.minRequestInterval = 500; // 500ms entre requisições (2 por segundo)
+
     // Adiciona interceptor para tratar erros
     this.client.interceptors.response.use(
       response => response,
@@ -26,12 +32,23 @@ class ShopifyService {
           
           // Trata erros específicos
           if (data.errors) {
-            const errorMessages = [];
-            Object.entries(data.errors).forEach(([field, messages]) => {
-              errorMessages.push(`${field}: ${messages.join(', ')}`);
-            });
+            let errorMessage = '';
+            if (typeof data.errors === 'string') {
+              errorMessage = data.errors;
+            } else if (typeof data.errors === 'object') {
+              const messages = [];
+              Object.entries(data.errors).forEach(([field, fieldErrors]) => {
+                if (Array.isArray(fieldErrors)) {
+                  messages.push(`${field}: ${fieldErrors.join(', ')}`);
+                } else if (typeof fieldErrors === 'string') {
+                  messages.push(`${field}: ${fieldErrors}`);
+                }
+              });
+              errorMessage = messages.join('; ');
+            }
+            
             throw new AppError(
-              `Erro de validação na Shopify: ${errorMessages.join('; ')}`,
+              `Erro de validação na Shopify: ${errorMessage}`,
               status
             );
           }
@@ -46,87 +63,123 @@ class ShopifyService {
     );
   }
 
+  async enqueueRequest(requestFn) {
+    return new Promise((resolve, reject) => {
+      this.requestQueue.push({ requestFn, resolve, reject });
+      this.processQueue();
+    });
+  }
+
+  async processQueue() {
+    if (this.processing || this.requestQueue.length === 0) {
+      return;
+    }
+
+    this.processing = true;
+
+    while (this.requestQueue.length > 0) {
+      const now = Date.now();
+      const timeSinceLastRequest = now - this.lastRequestTime;
+      
+      if (timeSinceLastRequest < this.minRequestInterval) {
+        await new Promise(resolve => 
+          setTimeout(resolve, this.minRequestInterval - timeSinceLastRequest)
+        );
+      }
+
+      const { requestFn, resolve, reject } = this.requestQueue.shift();
+
+      try {
+        this.lastRequestTime = Date.now();
+        const result = await requestFn();
+        resolve(result);
+      } catch (error) {
+        reject(error);
+      }
+    }
+
+    this.processing = false;
+  }
+
   async createOrUpdateOrder({ appmaxOrder, status, financialStatus }) {
-    try {
-      // Validação dos dados necessários
-      if (!appmaxOrder || !appmaxOrder.bundles) {
-        throw new AppError('Dados do pedido Appmax inválidos', 400);
-      }
-
-      // Adiciona retry com backoff exponencial para busca
-      let existingOrder = null;
-      let attempts = 0;
-      const maxAttempts = 3;
-      const baseDelay = 1000;
-
-      while (attempts < maxAttempts && !existingOrder) {
-        try {
-          existingOrder = await this.findOrderByAppmaxId(appmaxOrder.id);
-          
-          if (existingOrder) {
-            logger.info(`Pedido Appmax #${appmaxOrder.id} encontrado na Shopify: #${existingOrder.id}`);
-            return this.updateOrder(existingOrder.id, { appmaxOrder, status, financialStatus });
-          }
-
-          if (attempts > 0) {
-            // Se não encontrou na segunda ou terceira tentativa, podemos prosseguir para criar
-            break;
-          }
-        } catch (error) {
-          attempts++;
-          
-          if (attempts === maxAttempts || !this.isRetryableError(error)) {
-            throw error;
-          }
-
-          const delay = baseDelay * Math.pow(2, attempts - 1);
-          logger.info(`Tentativa ${attempts} de buscar pedido falhou, aguardando ${delay}ms antes de tentar novamente`);
-          await new Promise(resolve => setTimeout(resolve, delay));
+    return this.enqueueRequest(async () => {
+      try {
+        // Validação dos dados necessários
+        if (!appmaxOrder || !appmaxOrder.bundles) {
+          throw new AppError('Dados do pedido Appmax inválidos', 400);
         }
-      }
 
-      // Se chegou aqui, o pedido não existe e podemos criar
-      const orderData = this.formatOrderData(appmaxOrder, status, financialStatus);
-      logger.info('Criando pedido na Shopify:', orderData);
+        // Adiciona retry com backoff exponencial para busca
+        let existingOrder = null;
+        let attempts = 0;
+        const maxAttempts = 3;
+        const baseDelay = 1000;
 
-      // Tenta criar o pedido com retry
-      attempts = 0;
-      while (attempts < maxAttempts) {
-        try {
-          const { data } = await this.client.post('/orders.json', orderData);
-          return data.order;
-        } catch (error) {
-          attempts++;
-
-          // Se o erro for de email duplicado, tenta buscar o pedido novamente
-          if (error.response?.status === 422 && error.response?.data?.errors?.['customer.email']) {
-            logger.info(`Email duplicado detectado, verificando pedido novamente para Appmax #${appmaxOrder.id}`);
+        while (attempts < maxAttempts && !existingOrder) {
+          try {
             existingOrder = await this.findOrderByAppmaxId(appmaxOrder.id);
             
             if (existingOrder) {
-              logger.info(`Pedido encontrado após erro de email duplicado, atualizando Appmax #${appmaxOrder.id}`);
+              logger.info(`Pedido Appmax #${appmaxOrder.id} encontrado na Shopify: #${existingOrder.id}`);
               return this.updateOrder(existingOrder.id, { appmaxOrder, status, financialStatus });
             }
-          }
 
-          if (attempts === maxAttempts || !this.isRetryableError(error)) {
-            throw error;
-          }
+            if (attempts > 0) {
+              break;
+            }
+          } catch (error) {
+            attempts++;
+            
+            if (attempts === maxAttempts || !this.isRetryableError(error)) {
+              throw error;
+            }
 
-          const delay = baseDelay * Math.pow(2, attempts - 1);
-          logger.info(`Tentativa ${attempts} de criar pedido falhou, aguardando ${delay}ms antes de tentar novamente`);
-          await new Promise(resolve => setTimeout(resolve, delay));
+            const delay = baseDelay * Math.pow(2, attempts - 1);
+            logger.info(`Tentativa ${attempts} de buscar pedido falhou, aguardando ${delay}ms antes de tentar novamente`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
         }
+
+        const orderData = this.formatOrderData(appmaxOrder, status, financialStatus);
+        logger.info('Criando pedido na Shopify:', orderData);
+
+        attempts = 0;
+        while (attempts < maxAttempts) {
+          try {
+            const { data } = await this.client.post('/orders.json', orderData);
+            return data.order;
+          } catch (error) {
+            attempts++;
+
+            if (error.response?.status === 422 && error.response?.data?.errors?.['customer.email']) {
+              logger.info(`Email duplicado detectado, verificando pedido novamente para Appmax #${appmaxOrder.id}`);
+              existingOrder = await this.findOrderByAppmaxId(appmaxOrder.id);
+              
+              if (existingOrder) {
+                logger.info(`Pedido encontrado após erro de email duplicado, atualizando Appmax #${appmaxOrder.id}`);
+                return this.updateOrder(existingOrder.id, { appmaxOrder, status, financialStatus });
+              }
+            }
+
+            if (attempts === maxAttempts || !this.isRetryableError(error)) {
+              throw error;
+            }
+
+            const delay = baseDelay * Math.pow(2, attempts - 1);
+            logger.info(`Tentativa ${attempts} de criar pedido falhou, aguardando ${delay}ms antes de tentar novamente`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+        }
+      } catch (error) {
+        if (error instanceof AppError) {
+          throw error;
+        }
+        throw new AppError(
+          `Erro ao criar/atualizar pedido na Shopify: ${error.message}`,
+          error.response?.status || 500
+        );
       }
-    } catch (error) {
-      if (error instanceof AppError) {
-        throw error;
-      }
-      throw new AppError(
-        `Erro ao criar/atualizar pedido na Shopify: ${error.message}`,
-        error.response?.status || 500
-      );
-    }
+    });
   }
 
   formatPhoneNumber(phone) {
