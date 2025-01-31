@@ -11,7 +11,12 @@ class WebhookController {
         throw new AppError('Dados do webhook inválidos', 400);
       }
 
-      logger.info(`Webhook recebido: ${event}`);
+      logger.info('Webhook recebido:', {
+        event,
+        orderId: data.id,
+        status: data.status,
+        customer: `${data.customer?.firstname} ${data.customer?.lastname}`
+      });
 
       switch (event) {
         case 'OrderApproved':
@@ -36,8 +41,10 @@ class WebhookController {
 
       res.status(200).json({ success: true });
     } catch (error) {
-      logger.error('Erro ao processar webhook:', error);
-      next(error);
+      if (error instanceof AppError) {
+        return next(error);
+      }
+      next(new AppError('Erro interno ao processar webhook', 500));
     }
   }
 

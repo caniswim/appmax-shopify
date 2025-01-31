@@ -1,5 +1,6 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
+const AppError = require('../utils/AppError');
 
 class ShopifyService {
   constructor() {
@@ -10,10 +11,36 @@ class ShopifyService {
         'Content-Type': 'application/json'
       }
     });
+
+    // Adiciona interceptor para tratar erros
+    this.client.interceptors.response.use(
+      response => response,
+      error => {
+        if (error.response) {
+          const { data, status } = error.response;
+          logger.error('Erro na resposta da Shopify:', {
+            status,
+            errors: data.errors,
+            body: error.config.data
+          });
+          
+          throw new AppError(
+            `Erro na Shopify: ${JSON.stringify(data.errors)}`,
+            status
+          );
+        }
+        throw error;
+      }
+    );
   }
 
   async createOrUpdateOrder({ appmaxOrder, status, financialStatus }) {
     try {
+      // Validação dos dados necessários
+      if (!appmaxOrder || !appmaxOrder.bundles) {
+        throw new AppError('Dados do pedido Appmax inválidos', 400);
+      }
+
       // Verifica se o pedido já existe na Shopify
       const existingOrder = await this.findOrderByAppmaxId(appmaxOrder.id);
       
@@ -22,12 +49,18 @@ class ShopifyService {
       }
 
       const orderData = this.formatOrderData(appmaxOrder, status, financialStatus);
+      logger.info('Criando pedido na Shopify:', orderData);
       const { data } = await this.client.post('/orders.json', orderData);
       
       return data.order;
     } catch (error) {
-      logger.error('Erro ao criar/atualizar pedido na Shopify:', error);
-      throw error;
+      if (error instanceof AppError) {
+        throw error;
+      }
+      throw new AppError(
+        `Erro ao criar/atualizar pedido na Shopify: ${error.message}`,
+        error.response?.status || 500
+      );
     }
   }
 
@@ -42,16 +75,26 @@ class ShopifyService {
               title: product.name,
               quantity: product.quantity,
               price: product.price,
-              sku: product.sku
+              sku: product.sku,
+              requires_shipping: true,
+              taxable: true,
+              fulfillment_service: 'manual',
+              grams: 0
             });
           });
         }
       });
     }
 
+    if (lineItems.length === 0) {
+      throw new AppError('Pedido não contém produtos', 400);
+    }
+
     return {
       order: {
         line_items: lineItems,
+        email: appmaxOrder.customer.email,
+        phone: appmaxOrder.customer.telephone,
         customer: {
           first_name: appmaxOrder.customer.firstname,
           last_name: appmaxOrder.customer.lastname,
@@ -66,9 +109,32 @@ class ShopifyService {
           city: appmaxOrder.customer.address_city,
           province: appmaxOrder.customer.address_state,
           zip: appmaxOrder.customer.postcode,
-          country: 'BR'
+          country: 'BR',
+          phone: appmaxOrder.customer.telephone
+        },
+        billing_address: {
+          first_name: appmaxOrder.customer.firstname,
+          last_name: appmaxOrder.customer.lastname,
+          address1: appmaxOrder.customer.address_street,
+          address2: appmaxOrder.customer.address_street_complement,
+          city: appmaxOrder.customer.address_city,
+          province: appmaxOrder.customer.address_state,
+          zip: appmaxOrder.customer.postcode,
+          country: 'BR',
+          phone: appmaxOrder.customer.telephone
         },
         financial_status: financialStatus,
+        fulfillment_status: null,
+        currency: 'BRL',
+        total_price: appmaxOrder.total,
+        subtotal_price: appmaxOrder.total_products,
+        total_tax: '0.00',
+        total_discounts: appmaxOrder.discount || '0.00',
+        shipping_lines: [{
+          price: appmaxOrder.freight_value || '0.00',
+          code: appmaxOrder.freight_type || 'Standard',
+          title: appmaxOrder.freight_type || 'Frete Padrão'
+        }],
         note: `Pedido Appmax #${appmaxOrder.id}`,
         note_attributes: [
           {
