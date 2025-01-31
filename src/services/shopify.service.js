@@ -57,12 +57,11 @@ class ShopifyService {
       const existingOrder = await this.findOrderByAppmaxId(appmaxOrder.id);
       
       if (existingOrder) {
-        logger.info(`Pedido Appmax #${appmaxOrder.id} encontrado na Shopify #${existingOrder.id}`);
         return this.updateOrder(existingOrder.id, { appmaxOrder, status, financialStatus });
       }
 
-      logger.info(`Criando novo pedido para Appmax #${appmaxOrder.id}`);
       const orderData = this.formatOrderData(appmaxOrder, status, financialStatus);
+      logger.info('Criando pedido na Shopify:', orderData);
       const { data } = await this.client.post('/orders.json', orderData);
       
       return data.order;
@@ -117,7 +116,7 @@ class ShopifyService {
       'billet': {
         gateway: 'billet',
         name: 'Boleto',
-        payment_method_details: this.formatBilletDetails(appmaxOrder)
+        payment_method_details: appmaxOrder.payment_info?.billet_url || ''
       },
       'default': {
         gateway: 'manual',
@@ -135,28 +134,6 @@ class ShopifyService {
         payment_details: method.payment_method_details
       }
     };
-  }
-
-  formatBilletDetails(appmaxOrder) {
-    if (!appmaxOrder.payment_info) return '';
-    
-    const details = [];
-    
-    if (appmaxOrder.payment_info.billet_url) {
-      details.push(`URL: ${appmaxOrder.payment_info.billet_url}`);
-    }
-    
-    if (appmaxOrder.payment_info.billet_barcode) {
-      details.push(`Código de Barras: ${appmaxOrder.payment_info.billet_barcode}`);
-    }
-    
-    if (appmaxOrder.payment_info.billet_expiration_date) {
-      const expirationDate = new Date(appmaxOrder.payment_info.billet_expiration_date)
-        .toLocaleDateString('pt-BR');
-      details.push(`Vencimento: ${expirationDate}`);
-    }
-    
-    return details.join(' | ');
   }
 
   formatOrderData(appmaxOrder, status, financialStatus, additionalTags = []) {
@@ -213,10 +190,6 @@ class ShopifyService {
       appmaxOrder.status,
       `appmax_status_${status}`,
       `payment_${appmaxOrder.payment_type || 'unknown'}`,
-      // Adiciona tag de vencimento para boletos
-      appmaxOrder.payment_type === 'billet' && appmaxOrder.payment_info?.billet_expiration_date ? 
-        `billet_expires_${new Date(appmaxOrder.payment_info.billet_expiration_date).toISOString().split('T')[0]}` : 
-        null,
       ...additionalTags
     ].filter(Boolean);
 
@@ -301,7 +274,7 @@ class ShopifyService {
           credit_card_wallet: appmaxOrder.payment_info?.wallet || null
         }],
         transactions: [{
-          kind: 'sale',
+          kind: 'authorization',
           status: status === 'paid' ? 'success' : 'pending',
           amount: appmaxOrder.total,
           gateway: paymentMethod.gateway,
@@ -313,140 +286,32 @@ class ShopifyService {
 
   async findOrderByAppmaxId(appmaxId) {
     try {
-      // Busca com query mais específica
-      const { data } = await this.client.get('/orders.json?status=any', {
+      const { data } = await this.client.get('/orders.json', {
         params: {
-          query: `note_attribute:appmax_id=${appmaxId}`
+          note: `Pedido Appmax #${appmaxId}`
         }
       });
 
-      if (data.orders && data.orders.length > 0) {
-        return data.orders[0]; // Retorna o primeiro pedido encontrado
-      }
-      return null;
+      return data.orders.find(order => 
+        order.note_attributes.some(attr => 
+          attr.name === 'appmax_id' && attr.value === appmaxId.toString()
+        )
+      );
     } catch (error) {
-      logger.error('Erro ao buscar pedido na Shopify:', {
-        appmaxId,
-        error: error.message,
-        response: error.response?.data
-      });
-      return null;
+      logger.error('Erro ao buscar pedido na Shopify:', error);
+      throw error;
     }
   }
 
   async updateOrder(orderId, { appmaxOrder, status, financialStatus }) {
     try {
-      logger.info(`Atualizando pedido Shopify #${orderId}`, {
-        appmaxId: appmaxOrder.id,
-        status,
-        financialStatus
-      });
-
       const orderData = this.formatOrderData(appmaxOrder, status, financialStatus);
-      
-      // Primeiro, atualiza os status
-      await this.updateOrderStatus(orderId, status, financialStatus);
-      
-      // Depois atualiza os outros dados
-      const { data } = await this.client.put(`/orders/${orderId}.json`, {
-        order: {
-          ...orderData.order,
-          // Mantém o ID original do pedido
-          id: orderId,
-          // Não tenta atualizar campos imutáveis
-          line_items: undefined,
-          customer: undefined,
-          billing_address: undefined,
-          shipping_address: undefined
-        }
-      });
-
+      const { data } = await this.client.put(`/orders/${orderId}.json`, orderData);
       return data.order;
     } catch (error) {
-      logger.error('Erro ao atualizar pedido na Shopify:', {
-        orderId,
-        appmaxId: appmaxOrder.id,
-        error: error.message,
-        response: error.response?.data
-      });
-      throw new AppError(
-        `Erro ao atualizar pedido na Shopify: ${error.message}`,
-        error.response?.status || 500
-      );
-    }
-  }
-
-  async updateOrderStatus(orderId, status, financialStatus) {
-    try {
-      const updates = [];
-
-      // Atualiza status financeiro se necessário
-      if (financialStatus) {
-        const transaction = {
-          transaction: {
-            kind: this.getTransactionKind(financialStatus),
-            status: 'success'
-          }
-        };
-
-        // Adiciona valor apenas se não for uma atualização de status
-        if (transaction.transaction.kind === 'capture' || 
-            transaction.transaction.kind === 'sale') {
-          const order = await this.client.get(`/orders/${orderId}.json`);
-          transaction.transaction.amount = order.data.order.total_price;
-        }
-
-        updates.push(
-          this.client.post(`/orders/${orderId}/transactions.json`, transaction)
-        );
-      }
-
-      // Atualiza status de fulfillment se necessário
-      if (status === 'cancelled') {
-        updates.push(
-          this.client.post(`/orders/${orderId}/cancel.json`)
-        );
-      }
-
-      if (updates.length > 0) {
-        // Executa as atualizações em sequência para evitar conflitos
-        for (const update of updates) {
-          try {
-            await update;
-          } catch (error) {
-            // Se falhar a transação, tenta atualizar apenas o status
-            if (error.response?.data?.errors?.kind) {
-              await this.client.put(`/orders/${orderId}.json`, {
-                order: {
-                  id: orderId,
-                  financial_status: financialStatus
-                }
-              });
-            } else {
-              throw error;
-            }
-          }
-        }
-      }
-    } catch (error) {
-      logger.error('Erro ao atualizar status do pedido:', {
-        orderId,
-        status,
-        financialStatus,
-        error: error.message
-      });
+      logger.error('Erro ao atualizar pedido na Shopify:', error);
       throw error;
     }
-  }
-
-  getTransactionKind(financialStatus) {
-    const kindMapping = {
-      'pending': 'sale',
-      'paid': 'sale',
-      'refunded': 'refund',
-      'cancelled': 'void'
-    };
-    return kindMapping[financialStatus] || 'sale';
   }
 
   async cancelOrder(appmaxOrder) {
