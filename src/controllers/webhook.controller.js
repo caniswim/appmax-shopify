@@ -19,37 +19,51 @@ class WebhookController {
       });
 
       switch (event) {
-        case 'OrderPaid':
         case 'OrderApproved':
-        case 'PixPaid':
+          await this.handleOrderApproved(data);
+          break;
+          
+        case 'OrderPaid':
           await this.handleOrderPaid(data);
           break;
           
-        case 'OrderPendingIntegration':
-          logger.info(`Pedido #${data.id} pendente de integração`);
-          break;
-          
         case 'OrderRefund':
-        case 'OrderChargedback':
           await this.handleOrderRefund(data);
           break;
           
-        case 'PixGenerated':
-        case 'OrderIntegrated':
+        case 'PaymentNotAuthorized':
+          await this.handlePaymentNotAuthorized(data);
+          break;
+          
         case 'OrderAuthorized':
-          await this.handleOrderPending(data);
+          await this.handleOrderAuthorized(data);
           break;
-          
+
+        case 'PendingIntegration':
+          logger.info(`Pedido ${data.id} pendente de integração`, data);
+          break;
+
+        case 'PixGenerated':
+          await this.handlePixGenerated(data);
+          break;
+
         case 'PixExpired':
-        case 'OrderBilletOverdue':
-          await this.handleOrderCancelled(data);
+          await this.handlePixExpired(data);
           break;
-          
-        case 'OrderChargebackInDispute':
-          await this.handleChargebackInDispute(data);
+
+        case 'OrderIntegrated':
+          await this.handleOrderIntegrated(data);
           break;
-          
-        case 'OrderChargebackWon':
+
+        case 'BoletoExpired':
+          await this.handleBoletoExpired(data);
+          break;
+
+        case 'ChargebackDispute':
+          await this.handleChargebackDispute(data);
+          break;
+
+        case 'ChargebackWon':
           await this.handleChargebackWon(data);
           break;
           
@@ -64,6 +78,16 @@ class WebhookController {
       }
       next(new AppError('Erro interno ao processar webhook', 500));
     }
+  }
+
+  async handleOrderApproved(data) {
+    const order = await shopifyService.createOrUpdateOrder({
+      appmaxOrder: data,
+      status: 'paid',
+      financialStatus: 'paid'
+    });
+    
+    logger.info(`Pedido Appmax #${data.id} criado/atualizado na Shopify: #${order.id}`);
   }
 
   async handleOrderPaid(data) {
@@ -81,12 +105,12 @@ class WebhookController {
     logger.info(`Pedido Appmax #${data.id} reembolsado na Shopify: #${order.id}`);
   }
 
-  async handleOrderCancelled(data) {
+  async handlePaymentNotAuthorized(data) {
     const order = await shopifyService.cancelOrder(data);
     logger.info(`Pedido Appmax #${data.id} cancelado na Shopify: #${order.id}`);
   }
 
-  async handleOrderPending(data) {
+  async handleOrderAuthorized(data) {
     const order = await shopifyService.createOrUpdateOrder({
       appmaxOrder: data,
       status: 'pending',
@@ -96,26 +120,54 @@ class WebhookController {
     logger.info(`Pedido Appmax #${data.id} criado/atualizado na Shopify como pendente: #${order.id}`);
   }
 
-  async handleChargebackInDispute(data) {
+  async handlePixGenerated(data) {
     const order = await shopifyService.createOrUpdateOrder({
       appmaxOrder: data,
-      status: 'dispute',
-      financialStatus: 'pending',
-      tags: ['chargeback_in_dispute']
+      status: 'pending',
+      financialStatus: 'pending'
     });
     
-    logger.info(`Pedido Appmax #${data.id} marcado como em disputa de chargeback na Shopify: #${order.id}`);
+    logger.info(`Pedido Appmax #${data.id} com Pix gerado atualizado na Shopify: #${order.id}`);
+  }
+
+  async handlePixExpired(data) {
+    const order = await shopifyService.cancelOrder(data);
+    logger.info(`Pedido Appmax #${data.id} com Pix expirado cancelado na Shopify: #${order.id}`);
+  }
+
+  async handleOrderIntegrated(data) {
+    const order = await shopifyService.createOrUpdateOrder({
+      appmaxOrder: data,
+      status: 'pending',
+      financialStatus: 'pending'
+    });
+    
+    logger.info(`Pedido Appmax #${data.id} integrado na Shopify: #${order.id}`);
+  }
+
+  async handleBoletoExpired(data) {
+    const order = await shopifyService.cancelOrder(data);
+    logger.info(`Pedido Appmax #${data.id} com boleto vencido cancelado na Shopify: #${order.id}`);
+  }
+
+  async handleChargebackDispute(data) {
+    const order = await shopifyService.createOrUpdateOrder({
+      appmaxOrder: data,
+      status: 'under_review',
+      financialStatus: 'pending'
+    });
+    
+    logger.info(`Pedido Appmax #${data.id} em disputa de chargeback na Shopify: #${order.id}`);
   }
 
   async handleChargebackWon(data) {
     const order = await shopifyService.createOrUpdateOrder({
       appmaxOrder: data,
-      status: 'paid',
-      financialStatus: 'paid',
-      tags: ['chargeback_won']
+      status: 'authorized',
+      financialStatus: 'paid'
     });
     
-    logger.info(`Pedido Appmax #${data.id} marcado como chargeback ganho na Shopify: #${order.id}`);
+    logger.info(`Pedido Appmax #${data.id} com chargeback ganho na Shopify: #${order.id}`);
   }
 }
 

@@ -101,45 +101,9 @@ class ShopifyService {
     return null;
   }
 
-  getPaymentMethod(appmaxOrder) {
-    const paymentMapping = {
-      'credit_card': {
-        gateway: 'credit_card',
-        name: 'Cartão de Crédito',
-        payment_method_details: appmaxOrder.payment_info?.card_brand || ''
-      },
-      'pix': {
-        gateway: 'pix',
-        name: 'PIX',
-        payment_method_details: 'PIX'
-      },
-      'billet': {
-        gateway: 'billet',
-        name: 'Boleto',
-        payment_method_details: appmaxOrder.payment_info?.billet_url || ''
-      },
-      'default': {
-        gateway: 'manual',
-        name: 'Outro',
-        payment_method_details: ''
-      }
-    };
-
-    const method = paymentMapping[appmaxOrder.payment_type] || paymentMapping.default;
-    
-    return {
-      gateway: method.gateway,
-      payment_method: {
-        name: method.name,
-        payment_details: method.payment_method_details
-      }
-    };
-  }
-
-  formatOrderData(appmaxOrder, status, financialStatus, additionalTags = []) {
+  formatOrderData(appmaxOrder, status, financialStatus) {
     const lineItems = [];
     const formattedPhone = this.formatPhoneNumber(appmaxOrder.customer.telephone);
-    const paymentMethod = this.getPaymentMethod(appmaxOrder);
 
     // Mapeia os status da Appmax para os status da Shopify
     const shopifyStatus = {
@@ -147,15 +111,13 @@ class ShopifyService {
         pending: 'pending',
         paid: 'paid',
         refunded: 'refunded',
-        cancelled: 'voided',
-        dispute: 'pending'
+        cancelled: 'voided'
       },
       fulfillment: {
         pending: null,
         paid: null,
         refunded: null,
-        cancelled: 'cancelled',
-        dispute: null
+        cancelled: 'cancelled'
       }
     };
 
@@ -185,13 +147,6 @@ class ShopifyService {
     // Determina os status corretos
     const finalFinancialStatus = shopifyStatus.financial[financialStatus] || 'pending';
     const finalFulfillmentStatus = shopifyStatus.fulfillment[status] || null;
-
-    const tags = [
-      appmaxOrder.status,
-      `appmax_status_${status}`,
-      `payment_${appmaxOrder.payment_type || 'unknown'}`,
-      ...additionalTags
-    ].filter(Boolean);
 
     return {
       order: {
@@ -229,9 +184,7 @@ class ShopifyService {
         financial_status: finalFinancialStatus,
         fulfillment_status: finalFulfillmentStatus,
         currency: 'BRL',
-        tags: tags,
-        gateway: paymentMethod.gateway,
-        payment_gateway_names: [paymentMethod.gateway],
+        tags: [appmaxOrder.status, `appmax_status_${status}`], // Adiciona tags para rastreamento
         total_price: appmaxOrder.total,
         subtotal_price: appmaxOrder.total_products,
         total_tax: '0.00',
@@ -254,32 +207,8 @@ class ShopifyService {
           {
             name: 'appmax_payment_type',
             value: appmaxOrder.payment_type || ''
-          },
-          {
-            name: 'appmax_last_event',
-            value: status
-          },
-          {
-            name: 'payment_method',
-            value: paymentMethod.payment_method.name
-          },
-          {
-            name: 'payment_details',
-            value: paymentMethod.payment_method.payment_details
           }
-        ],
-        payment_details: [{
-          credit_card_company: appmaxOrder.payment_info?.card_brand || null,
-          credit_card_number: appmaxOrder.payment_info?.card_last4 ? `****${appmaxOrder.payment_info.card_last4}` : null,
-          credit_card_wallet: appmaxOrder.payment_info?.wallet || null
-        }],
-        transactions: [{
-          kind: 'authorization',
-          status: status === 'paid' ? 'success' : 'pending',
-          amount: appmaxOrder.total,
-          gateway: paymentMethod.gateway,
-          payment_details: paymentMethod.payment_method.payment_details
-        }]
+        ]
       }
     };
   }
