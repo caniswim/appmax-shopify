@@ -17,6 +17,7 @@ class ShopifyService {
     this.processing = false;
     this.lastRequestTime = 0;
     this.minRequestInterval = 500; // 500ms entre requisições (2 por segundo)
+    this.orderLocks = new Map(); // Controle de locks por pedido
 
     // Adiciona interceptor para tratar erros
     this.client.interceptors.response.use(
@@ -144,6 +145,18 @@ class ShopifyService {
     }
   }
 
+  async lockOrder(orderId) {
+    while (this.orderLocks.has(orderId)) {
+      logger.info(`Aguardando lock do pedido #${orderId} ser liberado`);
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    this.orderLocks.set(orderId, true);
+  }
+
+  releaseLock(orderId) {
+    this.orderLocks.delete(orderId);
+  }
+
   async createOrUpdateOrder({ appmaxOrder, status, financialStatus }) {
     return this.enqueueRequest(async () => {
       try {
@@ -151,31 +164,49 @@ class ShopifyService {
           throw new AppError('Dados do pedido Appmax inválidos', 400);
         }
 
-        logger.info(`Verificando existência do pedido Appmax #${appmaxOrder.id}`);
-        const existingOrder = await this.findOrderByAppmaxId(appmaxOrder.id);
-        
-        if (existingOrder) {
-          logger.info(`Pedido Appmax #${appmaxOrder.id} encontrado na Shopify: #${existingOrder.id}`);
-          return this.updateOrder(existingOrder.id, { appmaxOrder, status, financialStatus });
-        }
-
-        const orderData = this.formatOrderData(appmaxOrder, status, financialStatus);
-        logger.info('Criando pedido na Shopify:', orderData);
+        // Adquire lock do pedido
+        await this.lockOrder(appmaxOrder.id);
+        logger.info(`Lock adquirido para pedido Appmax #${appmaxOrder.id}`);
 
         try {
-          const { data } = await this.makeRequest(() => this.client.post('/orders.json', orderData));
-          return data.order;
-        } catch (error) {
-          if (error.response?.status === 422 && error.response?.data?.errors?.['customer.email']) {
-            logger.info(`Email duplicado detectado, verificando pedido novamente para Appmax #${appmaxOrder.id}`);
-            const retryOrder = await this.findOrderByAppmaxId(appmaxOrder.id);
-            
-            if (retryOrder) {
-              logger.info(`Pedido encontrado após erro de email duplicado, atualizando Appmax #${appmaxOrder.id}`);
-              return this.updateOrder(retryOrder.id, { appmaxOrder, status, financialStatus });
-            }
+          logger.info(`Verificando existência do pedido Appmax #${appmaxOrder.id}`);
+          const existingOrder = await this.findOrderByAppmaxId(appmaxOrder.id);
+          
+          if (existingOrder) {
+            logger.info(`Pedido Appmax #${appmaxOrder.id} encontrado na Shopify: #${existingOrder.id}`);
+            return this.updateOrder(existingOrder.id, { appmaxOrder, status, financialStatus });
           }
-          throw error;
+
+          // Verifica novamente antes de criar
+          const doubleCheck = await this.findOrderByAppmaxId(appmaxOrder.id);
+          if (doubleCheck) {
+            logger.info(`Pedido Appmax #${appmaxOrder.id} encontrado na segunda verificação: #${doubleCheck.id}`);
+            return this.updateOrder(doubleCheck.id, { appmaxOrder, status, financialStatus });
+          }
+
+          const orderData = this.formatOrderData(appmaxOrder, status, financialStatus);
+          logger.info('Criando pedido na Shopify:', orderData);
+
+          try {
+            const { data } = await this.makeRequest(() => this.client.post('/orders.json', orderData));
+            logger.info(`Pedido Appmax #${appmaxOrder.id} criado com sucesso na Shopify: #${data.order.id}`);
+            return data.order;
+          } catch (error) {
+            if (error.response?.status === 422 && error.response?.data?.errors?.['customer.email']) {
+              logger.info(`Email duplicado detectado, verificando pedido novamente para Appmax #${appmaxOrder.id}`);
+              const retryOrder = await this.findOrderByAppmaxId(appmaxOrder.id);
+              
+              if (retryOrder) {
+                logger.info(`Pedido encontrado após erro de email duplicado, atualizando Appmax #${appmaxOrder.id}`);
+                return this.updateOrder(retryOrder.id, { appmaxOrder, status, financialStatus });
+              }
+            }
+            throw error;
+          }
+        } finally {
+          // Libera o lock do pedido
+          this.releaseLock(appmaxOrder.id);
+          logger.info(`Lock liberado para pedido Appmax #${appmaxOrder.id}`);
         }
       } catch (error) {
         if (error instanceof AppError) {
