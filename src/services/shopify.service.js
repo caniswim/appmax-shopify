@@ -301,7 +301,7 @@ class ShopifyService {
           credit_card_wallet: appmaxOrder.payment_info?.wallet || null
         }],
         transactions: [{
-          kind: 'authorization',
+          kind: 'sale',
           status: status === 'paid' ? 'success' : 'pending',
           amount: appmaxOrder.total,
           gateway: paymentMethod.gateway,
@@ -382,14 +382,22 @@ class ShopifyService {
 
       // Atualiza status financeiro se necessário
       if (financialStatus) {
+        const transaction = {
+          transaction: {
+            kind: this.getTransactionKind(financialStatus),
+            status: 'success'
+          }
+        };
+
+        // Adiciona valor apenas se não for uma atualização de status
+        if (transaction.transaction.kind === 'capture' || 
+            transaction.transaction.kind === 'sale') {
+          const order = await this.client.get(`/orders/${orderId}.json`);
+          transaction.transaction.amount = order.data.order.total_price;
+        }
+
         updates.push(
-          this.client.post(`/orders/${orderId}/transactions.json`, {
-            transaction: {
-              kind: this.getTransactionKind(financialStatus),
-              status: 'success',
-              amount: 0 // Valor zero pois é apenas atualização de status
-            }
-          })
+          this.client.post(`/orders/${orderId}/transactions.json`, transaction)
         );
       }
 
@@ -401,7 +409,24 @@ class ShopifyService {
       }
 
       if (updates.length > 0) {
-        await Promise.all(updates);
+        // Executa as atualizações em sequência para evitar conflitos
+        for (const update of updates) {
+          try {
+            await update;
+          } catch (error) {
+            // Se falhar a transação, tenta atualizar apenas o status
+            if (error.response?.data?.errors?.kind) {
+              await this.client.put(`/orders/${orderId}.json`, {
+                order: {
+                  id: orderId,
+                  financial_status: financialStatus
+                }
+              });
+            } else {
+              throw error;
+            }
+          }
+        }
       }
     } catch (error) {
       logger.error('Erro ao atualizar status do pedido:', {
@@ -416,12 +441,12 @@ class ShopifyService {
 
   getTransactionKind(financialStatus) {
     const kindMapping = {
-      'pending': 'authorization',
-      'paid': 'capture',
+      'pending': 'sale',
+      'paid': 'sale',
       'refunded': 'refund',
       'cancelled': 'void'
     };
-    return kindMapping[financialStatus] || 'authorization';
+    return kindMapping[financialStatus] || 'sale';
   }
 
   async cancelOrder(appmaxOrder) {
