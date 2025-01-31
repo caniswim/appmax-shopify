@@ -117,7 +117,7 @@ class ShopifyService {
       'billet': {
         gateway: 'billet',
         name: 'Boleto',
-        payment_method_details: appmaxOrder.payment_info?.billet_url || ''
+        payment_method_details: this.formatBilletDetails(appmaxOrder)
       },
       'default': {
         gateway: 'manual',
@@ -135,6 +135,28 @@ class ShopifyService {
         payment_details: method.payment_method_details
       }
     };
+  }
+
+  formatBilletDetails(appmaxOrder) {
+    if (!appmaxOrder.payment_info) return '';
+    
+    const details = [];
+    
+    if (appmaxOrder.payment_info.billet_url) {
+      details.push(`URL: ${appmaxOrder.payment_info.billet_url}`);
+    }
+    
+    if (appmaxOrder.payment_info.billet_barcode) {
+      details.push(`Código de Barras: ${appmaxOrder.payment_info.billet_barcode}`);
+    }
+    
+    if (appmaxOrder.payment_info.billet_expiration_date) {
+      const expirationDate = new Date(appmaxOrder.payment_info.billet_expiration_date)
+        .toLocaleDateString('pt-BR');
+      details.push(`Vencimento: ${expirationDate}`);
+    }
+    
+    return details.join(' | ');
   }
 
   formatOrderData(appmaxOrder, status, financialStatus, additionalTags = []) {
@@ -191,6 +213,10 @@ class ShopifyService {
       appmaxOrder.status,
       `appmax_status_${status}`,
       `payment_${appmaxOrder.payment_type || 'unknown'}`,
+      // Adiciona tag de vencimento para boletos
+      appmaxOrder.payment_type === 'billet' && appmaxOrder.payment_info?.billet_expiration_date ? 
+        `billet_expires_${new Date(appmaxOrder.payment_info.billet_expiration_date).toISOString().split('T')[0]}` : 
+        null,
       ...additionalTags
     ].filter(Boolean);
 

@@ -37,11 +37,13 @@ class WebhookController {
         case 'PixGenerated':
         case 'OrderIntegrated':
         case 'OrderAuthorized':
+        case 'OrderBilletCreated':
           await this.handleOrderPending(data);
           break;
           
         case 'PixExpired':
         case 'OrderBilletOverdue':
+        case 'PaymentNotAuthorized':
           await this.handleOrderCancelled(data);
           break;
           
@@ -90,10 +92,18 @@ class WebhookController {
     const order = await shopifyService.createOrUpdateOrder({
       appmaxOrder: data,
       status: 'pending',
-      financialStatus: 'pending'
+      financialStatus: 'pending',
+      additionalTags: [
+        data.payment_type === 'billet' ? 'billet_pending' : null,
+        data.payment_type === 'pix' ? 'pix_pending' : null
+      ].filter(Boolean)
     });
     
-    logger.info(`Pedido Appmax #${data.id} criado/atualizado na Shopify como pendente: #${order.id}`);
+    const paymentType = data.payment_type === 'billet' ? 'boleto' : 
+                       data.payment_type === 'pix' ? 'PIX' : 
+                       'pagamento';
+    
+    logger.info(`Pedido Appmax #${data.id} aguardando ${paymentType}: Shopify #${order.id}`);
   }
 
   async handleChargebackInDispute(data) {
