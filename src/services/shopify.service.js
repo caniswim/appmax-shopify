@@ -21,7 +21,7 @@ class ShopifyService {
     // Adiciona interceptor para tratar erros
     this.client.interceptors.response.use(
       response => response,
-      error => {
+      async error => {
         if (error.response) {
           const { data, status } = error.response;
           logger.error('Erro na resposta da Shopify:', {
@@ -29,6 +29,13 @@ class ShopifyService {
             errors: data.errors,
             body: error.config.data
           });
+
+          // Se for erro de rate limit, aguarda e tenta novamente
+          if (status === 429) {
+            logger.info('Rate limit atingido, aguardando antes de tentar novamente');
+            await new Promise(resolve => setTimeout(resolve, this.minRequestInterval));
+            return this.client.request(error.config);
+          }
           
           // Trata erros específicos
           if (data.errors) {
@@ -63,6 +70,20 @@ class ShopifyService {
     );
   }
 
+  async makeRequest(requestFn) {
+    const now = Date.now();
+    const timeSinceLastRequest = now - this.lastRequestTime;
+    
+    if (timeSinceLastRequest < this.minRequestInterval) {
+      await new Promise(resolve => 
+        setTimeout(resolve, this.minRequestInterval - timeSinceLastRequest)
+      );
+    }
+
+    this.lastRequestTime = Date.now();
+    return requestFn();
+  }
+
   async enqueueRequest(requestFn) {
     return new Promise((resolve, reject) => {
       this.requestQueue.push({ requestFn, resolve, reject });
@@ -78,22 +99,19 @@ class ShopifyService {
     this.processing = true;
 
     while (this.requestQueue.length > 0) {
-      const now = Date.now();
-      const timeSinceLastRequest = now - this.lastRequestTime;
-      
-      if (timeSinceLastRequest < this.minRequestInterval) {
-        await new Promise(resolve => 
-          setTimeout(resolve, this.minRequestInterval - timeSinceLastRequest)
-        );
-      }
-
       const { requestFn, resolve, reject } = this.requestQueue.shift();
 
       try {
-        this.lastRequestTime = Date.now();
-        const result = await requestFn();
+        const result = await this.makeRequest(requestFn);
         resolve(result);
       } catch (error) {
+        // Se for erro de rate limit, coloca de volta na fila
+        if (error.response?.status === 429) {
+          logger.info('Rate limit atingido, recolocando requisição na fila');
+          this.requestQueue.unshift({ requestFn, resolve, reject });
+          await new Promise(resolve => setTimeout(resolve, this.minRequestInterval));
+          continue;
+        }
         reject(error);
       }
     }
@@ -320,26 +338,27 @@ class ShopifyService {
   }
 
   async findOrderByAppmaxId(appmaxId) {
-    try {
-      // Busca usando query por tags que é mais eficiente
-      const { data } = await this.client.get('/orders.json', {
-        params: {
-          status: 'any',
-          fields: 'id,note_attributes,financial_status,fulfillment_status',
-          limit: 1,
-          query: `note_attribute:appmax_id:${appmaxId}`
-        }
-      });
+    return this.makeRequest(async () => {
+      try {
+        const { data } = await this.client.get('/orders.json', {
+          params: {
+            status: 'any',
+            fields: 'id,note_attributes,financial_status,fulfillment_status',
+            limit: 1,
+            query: `note_attribute:appmax_id:${appmaxId}`
+          }
+        });
 
-      return data.orders.find(order => 
-        order.note_attributes.some(attr => 
-          attr.name === 'appmax_id' && attr.value === appmaxId.toString()
-        )
-      );
-    } catch (error) {
-      logger.error('Erro ao buscar pedido na Shopify:', error);
-      throw error;
-    }
+        return data.orders.find(order => 
+          order.note_attributes.some(attr => 
+            attr.name === 'appmax_id' && attr.value === appmaxId.toString()
+          )
+        );
+      } catch (error) {
+        logger.error('Erro ao buscar pedido na Shopify:', error);
+        throw error;
+      }
+    });
   }
 
   async updateOrder(orderId, { appmaxOrder, status, financialStatus }) {
