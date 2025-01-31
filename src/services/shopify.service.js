@@ -215,9 +215,13 @@ class ShopifyService {
 
   async findOrderByAppmaxId(appmaxId) {
     try {
+      // Busca usando query por tags que é mais eficiente
       const { data } = await this.client.get('/orders.json', {
         params: {
-          note: `Pedido Appmax #${appmaxId}`
+          status: 'any',
+          fields: 'id,note_attributes,financial_status,fulfillment_status',
+          limit: 1,
+          query: `note_attribute:appmax_id:${appmaxId}`
         }
       });
 
@@ -234,13 +238,70 @@ class ShopifyService {
 
   async updateOrder(orderId, { appmaxOrder, status, financialStatus }) {
     try {
-      const orderData = this.formatOrderData(appmaxOrder, status, financialStatus);
-      const { data } = await this.client.put(`/orders/${orderId}.json`, orderData);
-      return data.order;
+      // Atualiza apenas os campos permitidos
+      const updateData = {
+        order: {
+          id: orderId,
+          financial_status: this.mapFinancialStatus(financialStatus),
+          tags: [appmaxOrder.status, `appmax_status_${status}`],
+          note_attributes: [
+            {
+              name: 'appmax_id',
+              value: appmaxOrder.id.toString()
+            },
+            {
+              name: 'appmax_status',
+              value: appmaxOrder.status
+            },
+            {
+              name: 'appmax_payment_type',
+              value: appmaxOrder.payment_type || ''
+            }
+          ]
+        }
+      };
+
+      // Adiciona retry com backoff exponencial
+      let attempts = 0;
+      const maxAttempts = 3;
+      const baseDelay = 1000; // 1 segundo
+
+      while (attempts < maxAttempts) {
+        try {
+          const { data } = await this.client.put(`/orders/${orderId}.json`, updateData);
+          return data.order;
+        } catch (error) {
+          attempts++;
+          
+          if (attempts === maxAttempts || !this.isRetryableError(error)) {
+            throw error;
+          }
+
+          const delay = baseDelay * Math.pow(2, attempts - 1);
+          logger.info(`Tentativa ${attempts} falhou, aguardando ${delay}ms antes de tentar novamente`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
     } catch (error) {
       logger.error('Erro ao atualizar pedido na Shopify:', error);
       throw error;
     }
+  }
+
+  isRetryableError(error) {
+    // Lista de códigos de erro que podem ser resolvidos com retry
+    const retryableStatusCodes = [408, 429, 500, 502, 503, 504];
+    return retryableStatusCodes.includes(error.response?.status);
+  }
+
+  mapFinancialStatus(status) {
+    const statusMap = {
+      'pending': 'pending',
+      'paid': 'paid',
+      'refunded': 'refunded',
+      'cancelled': 'voided'
+    };
+    return statusMap[status] || 'pending';
   }
 
   async cancelOrder(appmaxOrder) {
