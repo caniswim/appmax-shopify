@@ -1,0 +1,496 @@
+Recebendo notificações por Webhooks
+
+A Appmax possui envio de notiﬁcações de eventos dos clientes por webhooks. Você pode cadastrar URLs para receber
+essa notificações em Configurações > Webhooks.
+
+
+
+A URL de recebimento das requisições deve ser inserida em URL Destino. Abaixo, é possível escolher variáveis para
+serem enviadas via parâmetro para a sua URL. Todas as variáveis estão disponíveis apenas em eventos de Pedido ou
+Pagamento. A conﬁguração de Webhook ocorre por site, para cadastrar webhooks para vários sites é preciso fazer a
+conﬁguração para cada site. Nas opções de Template, é possível escolher entre DefaultResponse (multinível) ou
+TwoLevel (apenas dois níveis), dependendo de quantos níveis a sua aplicação suporta.
+
+
+
+
+Eventos
+
+Na seleção de eventos, é possível escolher o recebimento dos seguintes eventos:
+
+   Customer created
+   Customer Interest (60m)
+   Order Approved
+   Order Authorized
+   Order Authorized With Delay (60m)
+   Order Billet Created
+   Order Billet Overdue
+   Order Integrated
+   Order Paid
+   Order Pending Integration
+   Order Refund
+   Order UpSold
+   Payment Not Authorized
+   Payment Not Authorized With Delay (60m)
+
+A seguir, é exibido o modelo de corpo de requisição dos dois tipos de template para eventos de Cliente e Pedido. Mais
+abaixo, cada evento tem sua função descrita, bem como as suas variações com relação ao modelo de corpo de
+requisição apresentado. Para mais informações sobre o funil de pedidos na plataforma, veja o documento sobre os
+status dos pedidos na Appmax.
+
+
+
+
+Informações de Cliente
+
+Na parte dos dados de Customer, são enviados os dados de cadastro do cliente, bem como sua data de criação
+(created_at) e o site de criação do cadastro (site_id). No caso de produtos digitais, os campos de endereço serão vazios.
+Todos os eventos incluem as informações de cliente. Veja o padrão no exemplo abaixo:
+
+
+  Default       Two
+                Level
+
+
+
+
+         "data":
+         {
+             "id":"7273638",
+             "firstname":"teste",
+             "lastname":"teste",
+             "email":"L89mvXPKDR7NebaA@appmax.com.br",
+             "telephone":"98981899488",
+             "hash":"00656102021060-1578340560-0545314001578340560",
+             "postcode":"90040310",
+             "address_street":"Rua Olavo Bilac",
+             "address_street_number":"123",
+             "address_street_complement":"Bloco 7",
+             "address_street_district":"Azenha",
+             "address_city":"Porto Alegre",
+             "address_state":"RS",
+             "document_number":"19100000000",
+             "site_id":"1000",
+             "created_at":"2020-01-06 16:56:00"
+             "interested_bundle": [ # Disponível apenas para parceiros utilizando o checkout da Appmax
+               {
+                 "id":5000,
+                 "name":"Compre 3 Leve 5",
+                 "products": [
+                   {
+                     "id":300,
+                     "sku":001523,
+                     "name":"Produto Teste",
+                     "description":"",
+                     "price":"40.00",
+                     "quantity":5,
+Informações de Pedido"image":"https://appmax.com.br/logo.png",
+                     "external_id":4436655833184
+                   }
+                 ],
+Na   parte dos }     dados de Order, são enviados os dados de cadastro do cliente juntamente com as informações do pedido.
+             ]
+As   informações
+         }                de pedido incluem comissões de produtor, aﬁliados e coprodutores, status, informações de pagamento,
+datas de criação e de mudança de status, dados de carrinho, dados de empresa, variáveis de rastreamento.
+
+
+  Default       Two
+                Level
+       "data":
+       {
+           "id":3173109,
+           "customer_id":7273638,
+           "total_products":"398.00",
+           "status":"aprovado",
+           "freight_value":"0.00",
+           "freight_type":"PAC",
+           "payment_type":"CreditCard",
+           "card_brand":"Visa",
+           "partner_total":"313.64",
+           "partner_affiliate_total":"75.58",
+           "billet_date_overdue":"",
+           "billet_url":null,
+           "installments":6,
+           "paid_at":"2020-01-06 15:46:48",
+           "refunded_at":null,
+           "integrated_at":null,
+           "created_at":"2020-01-06 15:42:50",
+           "discount":"50.00",
+           "interest":"37.31",
+           "upsell_order_id":3172440,
+           "origin":"system",
+           "total":"385.31",
+           "customer": {…},
+           "bundles": [
+             {
+                "id":5000,
+                "name":"Compre 3 Leve 5",
+Na próxima seção,          as alterações importantes no corpo da requisição conforme o evento são mostradas.
+                "description":"",
+                "production_cost":"R$200",
+                "identifier":null,
+                "products": [
+                  {
+Customer Created    "id":300,
+                    "sku":001523,
+                    "name":"Produto Teste",
+                    "description":"",
+                    "price":"40.00",
+Ocorre no momento             em que o cliente é cadastrado no sistema. Utilizando o Checkout da Appmax, o cliente é cadastrado
+                    "quantity":5,
+sem os dados "image":"https://appmax.com.br/logo.png",
+                    de endereço, sendo depois atualizado com essas informações. No caso de um produto digital, os dados de
+                    "external_id":4436655833184
+endereço são} ocpionais, de forma que podem não ser cadastrados.
+                ]
+             }
+           ],
+           "visit":
+           {
+                "utm_source":null,
+                "utm_medium":null,
+       "environment":"production",
+                "utm_campaign":null,
+       "event":"CustomerCreated",
+                "affiliate_id":null
+       "data":
+           }, {…},
+          "company_name":"Minha Empresa",
+          "company_cnpj":"57.593.720/0001-12",
+          "company_email":"contato@empresa.com",
+          "co_production_commission": [
+            {
+               "user_id":1234,
+               "value":"10.00"
+            }
+Customer Interest (60m)
+          ],
+          "affiliate_commission":[
+            {
+                 "affiliate_id":307,
+É o evento de"name":"Afiliado
+                    abandono Teste", de carrinho. O envio ocorre 60 minutos após o cadastro do cliente e somente se o cliente não
+                 "email":"afiliado@teste.com",
+                 "value":"75.58"
+efetuou nenhum pedido durante esse período. Esse cliente ainda pode ser convertido na atuação do Televendas e passar
+            },
+a ter um pedido.
+          ],
+          "traffic_description":null,
+          "full_payment_amount":"75.58"
+       }
+       "environment":"production",
+       "event":"CustomerInterested",
+       "data": {…},
+
+
+
+
+Order Approved
+
+Ocorre toda vez que um pedido tem seu status alterado para Aprovado, tanto pedidos de cartão de crédito quanto de
+boleto que já passaram e foram aprovados na análise antifraude. Nesse evento, o cliente já possui um carrinho com os
+produtos vinculados ao pedido, bem como data de pagamento e demais informações de pedido.
+
+
+  Default         Two
+                  Level
+
+
+
+
+       "environment":"production",
+       "event":"OrderApproved",
+       "data":
+        {
+           …
+           "id":3173109, # ID do pedido
+           "status":"aprovado",
+           "payment_type":"CreditCard", # Meio de pagamento
+           "card_brand":"Visa", # Bandeira do cartão de crédito
+           "partner_total":"313.64", # Valor de venda líquido de taxas
+           "partner_affiliate_total":"75.58", # Comissão de venda de afiliado
+           "paid_at":"2020-01-06 15:46:48", # Data de pagamento do pedido
+           "upsell_order_id":3172440, # No caso de um upsell pelo Televendas, aqui vai o ID do pedido original efetuado pelo site
+           "origin":"system", # Caso o pedido tenha sido feito pelo Televendas, o tipo é 'system'
+           "total":"385.31", # Valor total pago pelo cliente na venda
+           "bundles": [{…}], # Conteúdo do carrinho do cliente no pedido
+           "visit": {…}, # Variáveis de rastreamento (tracking) do cliente
+           "co_production_commission": [{…}], # Informações de valores pagos para coprodutores
+           "affiliate_commission": [{…}], # Informações de valores pagos para afiliados
+           …
+        },
+
+
+
+
+Order Authorized
+
+Esse evento acontece logo após a autorização da transação de cartão de crédito pela adquirente. Os pedidos são
+enviados nesse momento com o status Autorizado. O conteúdo do corpo de requisição é o mesmo do evento de
+OrderApproved, com destaque para os campos abaixo.
+
+
+  Default         Two
+                  Level
+       "environment":"production",
+       "event":"OrderAuthorized",
+       "data":
+        {
+           …
+           "id":3173109, # ID do pedido
+           "status":"autorizado",
+           "payment_type":"CreditCard", # Meio de pagamento
+           "card_brand":"Visa", # Bandeira do cartão de crédito
+           "partner_total":"313.64", # Valor de venda líquido de taxas
+           "installments":6, # Número de parcelas escolhido pelo cliente
+           "paid_at":"2020-01-06 15:46:48", # Data de pagamento do pedido
+           "upsell_order_id":3172440, # No caso de um upsell pelo Televendas, aqui vai o ID do pedido original efetuado pelo site
+           "origin":"system", # Caso o pedido tenha sido feito pelo Televendas, o tipo é 'system'
+           "total":"385.31", # Valor total pago pelo cliente na venda
+           …
+        },
+
+
+
+
+Order Authorized With Delay (60m)
+
+Mesmo conteúdo do evento de OrderAuthorized, porém com delay de 60 minutos após o momento da autorização.
+
+
+
+
+       "environment":"production",
+       "event":"OrderAuthorizedWithDelay",
+       "data": {…},
+
+
+
+
+Order Billet Created
+
+Toda a vez que um cliente gera um boleto, esse evento é disparado. No corpo da requisição são enviados o link para
+visualização do boleto e a data de vencimento do mesmo. Como se trata de um pedido sem pagamento, todos os valores
+de comissão são nulos.
+
+
+  Default         Two
+                  Level
+       "environment":"production",
+       "event":"OrderBilletCreated",
+       "data":
+        {
+           …
+           "id":3173109, # ID do pedido
+           "status":"pendente",
+           "payment_type":"Boleto", # Meio de pagamento
+           "partner_total":"0.00", # Não há comissão pois não houve pagamento
+           "billet_date_overdue":"07/01/2020 17h03", # Data de vencimento do boleto
+           "billet_url":"https://www.asaas.com/b/pdf/824306128548232", # Link para visualização do boleto
+           "paid_at":null, # Não há data de pagamento
+           "origin":"system", # Caso o pedido tenha sido feito pelo Televendas, o tipo é 'system'
+           "total":"385.31", # Valor total do boleto gerado
+           …
+        },
+
+
+
+
+Order Billet Overdue
+
+Ocorre quando o boleto atinge sua data de vencimento. Possui o mesmo conteúdo do evento de OrderBilletCreated.
+
+
+  Default        Two
+                 Level
+
+
+
+
+       "environment":"production",
+       "event":"OrderBilletOverdue",
+       "data":
+        {
+           …
+           "id":3173109, # ID do pedido
+           "status":"pendente",
+           "payment_type":"Boleto", # Meio de pagamento
+           "partner_total":"0.00", # Não há comissão pois não houve pagamento
+           "billet_date_overdue":"07/01/2020 17h03", # Data de vencimento do boleto
+           "billet_url":"https://www.asaas.com/b/pdf/824306128548232", # Link para visualização do boleto
+           "paid_at":null, # Não há data de pagamento
+           "origin":"system", # Caso o pedido tenha sido feito pelo Televendas, o tipo é 'system'
+           "total":"385.31", # Valor total do boleto gerado
+           …
+        },
+
+
+
+
+Order Integrated
+
+Evento disparado quando o pedido muda para o status Integrado. Essa é a última etapa de um pedido aprovado no ﬂuxo
+do sistema. Esse deve ser o status/evento utilizado para emissões de Notas Fiscais, pois esse evento é disparado após
+todas as validações.
+
+
+  Default        Two
+                 Level
+       "environment":"production",
+       "event":"OrderIntegrated",
+       "data":
+        {
+           …
+           "id":3173109, # ID do pedido
+           "status":"integrado",
+           "paid_at":"2020-01-07 20:53:06", # Data de pagamento do pedido
+           "integrated_at":"2020-01-07 20:53:06", # Data de integração do pedido
+           …
+        },
+
+
+
+
+Order Paid
+
+Evento disparado tanto no momento da autorização quando na mudança para status Aprovado. Esse evento é
+recomendado para receber a notificação no momento do pagamento, sem esperar o resultado da análise de fraude.
+
+
+  Default        Two
+                 Level
+
+
+
+
+       "environment":"production",
+       "event":"OrderPaid",
+       "data":
+        {
+           …
+           "id":3173109, # ID do pedido
+           "status":"aprovado",
+           "paid_at":"2020-01-07 20:53:06", # Data de pagamento do pedido
+           …
+        },
+
+
+
+
+Order Pending Integration
+
+Esse evento ocorre quando há alguma pendência no pedido impedindo que ele mude seu status para Integrado. Isso
+pode ocorrer devido a um problema na validação dos dados (CEP inconsistente com os dados de endereço informados,
+por exemplo).
+
+
+  Default        Two
+                 Level
+       "environment":"production",
+       "event":"OrderPendingIntegration",
+       "data":
+        {
+           …
+           "id":3173109, # ID do pedido
+           "status":"aprovado",
+           "paid_at":"2020-01-07 20:53:06", # Data de pagamento do pedido
+           "integrated_at":null, # Não há data de integração devido a pendências
+           …
+        },
+
+
+
+
+Order Refund
+
+Quando o pedido é estornado, seja por fraude após a análise manual ou pela aprovação de uma solicitação de um
+reembolso, esse evento é disparado.
+
+
+  Default         Two
+                  Level
+
+
+
+
+       "environment":"production",
+       "event":"OrderRefund",
+       "data":
+        {
+           …
+           "id":3173109, # ID do pedido
+           "status":"estornado",
+           "paid_at":"2020-01-07 20:53:06", # Data de pagamento do pedido
+           "refunded_at":"2020-01-08 10:24:18", # Data de estorno do pedido
+           "integrated_at":null, # Pode não haver data de integração se o estorno ocorreu antes da integração
+           …
+        },
+
+
+
+
+Order UpSold
+
+No caso de um pedido ter um upsell de um clique, esse evento é disparado. Para que ele ocorra, é necessário que o
+cliente já tenha um pedido realizado pelo site e aceite aumentar o seu pedido pelo botão de upsell.
+
+
+  Default         Two
+                  Level
+       "environment":"production",
+       "event":"OrderUpSold",
+       "data":
+        {
+           …
+           "id":3173109, # ID do pedido
+           "status":"aprovado",
+           "paid_at":"2020-01-07 20:53:06", # Data de pagamento do pedido
+           "upsell_order_id":null, # no upsell de um clique o pedido segue com o mesmo ID
+           "origin":"Site", # Quando o pedido é feito pelo upsell de um clique a origem será 'Site'
+           …
+        },
+
+
+
+
+Payment Not Authorized
+
+Quando uma transação de cartão de crédito não é aprovada, esse evento é disparado. Acompanha junto ao evento a
+razão da negativa do pagamento.
+
+
+  Default         Two
+                  Level
+
+
+
+
+       "environment":"production",
+       "event":"PaymentNotAuthorized | Reason: Autorizacao negada",
+       "data":
+        {
+           …
+           "id":3173109, # ID do pedido
+           "status":"cancelado", # Pedidos com transação não autorizada possuem status Cancelado
+           "payment_type":"CreditCard", # Pagamento sempre de cartão nesse evento
+           "card_brand":"Visa", # Bandeira do cartão de crédito
+           "paid_at":null, # Data de pagamento do pedido é nula
+           …
+        },
+
+
+
+
+Payment Not Authorized With Delay (60m)
+
+Mesmo conteúdo do evento de PaymentNotAuthorized, porém com delay de 60 minutos após o momento da negativa.
+
+
+
+
+       "environment":"production",
+       "event":"PaymentNotAuthorizedWithDelay | Reason: Autorizacao negada",
+       "data": {…},
+

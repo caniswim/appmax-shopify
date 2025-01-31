@@ -1,0 +1,259 @@
+Abaixo está uma documentação de desenvolvimento para criar um programa em Node.js que integre a Appmax com a Shopify, recebendo webhooks da Appmax em tempo real e criando/atualizando pedidos na sua loja Shopify.
+1. Visão Geral da Integração
+
+    Appmax
+        Plataforma que gerencia pedidos, pagamentos e envia notificações (webhooks) quando ocorrem eventos (ex.: OrderApproved, OrderPaid, PaymentNotAuthorized, etc.).
+
+    Shopify
+        Plataforma de e-commerce onde você deseja manter os pedidos sincronizados.
+        Usaremos a Shopify Admin API para criar ou atualizar pedidos.
+
+    Seu Programa em Node.js
+        Objetivo: Criar um servidor que expõe um endpoint HTTP capaz de receber os webhooks enviados pela Appmax.
+        Ao receber um evento, esse servidor faz chamadas à API da Shopify para manter os pedidos atualizados.
+
+Fluxo de dados:
+
+    A Appmax envia um POST (webhook) para o endpoint do seu programa Node.js (por exemplo, https://seuservidor.com/webhook/appmax).
+    O programa Node.js processa o JSON recebido e chama a Shopify Admin API para criar/atualizar o pedido.
+    Retorna HTTP 200 à Appmax para confirmar o recebimento do webhook.
+
+2. Pré-Requisitos
+
+    Conta na Appmax com acesso a Configurações > Webhooks (você precisa cadastrar a URL do seu servidor).
+    Loja Shopify configurada e App (pode ser um App Privado ou um Custom App) com permissões de:
+        write_orders (para criar/atualizar pedidos);
+        write_customers (caso você queira criar/atualizar clientes).
+    Servidor ou Ambiente Node.js para executar o seu programa de integração.
+        Pode ser hospedado em um serviço de nuvem (Heroku, AWS, etc.) ou em seu próprio VPS/servidor dedicado.
+    Conexão HTTPS: É altamente recomendado ter um endpoint HTTPS para receber webhooks.
+
+3. Configuração na Appmax
+
+    No Painel da Appmax, vá em Configurações > Webhooks.
+    Escolha o site para o qual você deseja receber eventos (caso haja mais de um).
+    Em URL Destino, insira a URL pública do seu servidor Node que receberá as notificações. Exemplo:
+
+    https://seuservidor.com/webhook/appmax
+
+    Escolha o Template (pode ser DefaultResponse ou TwoLevel).
+        O DefaultResponse costuma trazer mais dados em formato aninhado.
+    Selecione os eventos que deseja receber. Por exemplo:
+        OrderApproved
+        OrderPaid
+        PaymentNotAuthorized
+        OrderRefund
+        etc.
+    Salve. A partir de agora, sempre que ocorrer um desses eventos, a Appmax enviará uma requisição POST com um JSON para a URL configurada.
+
+4. Configuração na Shopify (App e Credenciais)
+
+    Acesse o Admin da sua loja Shopify.
+    Vá em Configurações > Apps e canais de vendas > Desenvolver Apps.
+    Crie um novo app (ou edite um existente) e garanta as permissões de:
+        write_orders
+        write_customers (caso precise criar/atualizar clientes).
+    Gere o Access Token (ou Admin API Key) na sessão de configurações do app.
+        Você precisará desse token no seu servidor Node.js para autenticar as requisições à API da Shopify.
+
+5. Estrutura Básica do Projeto em Node.js
+
+Seu programa Node.js pode ser estruturado da seguinte forma (exemplo simplificado):
+
+meu-projeto/
+ ├─ package.json
+ ├─ server.js
+ └─ ...
+
+Onde:
+
+    server.js: Arquivo principal do servidor que receberá webhooks e fará chamadas à Shopify.
+
+No package.json, certifique-se de ter as dependências, por exemplo:
+
+{
+  "name": "shopify-appmax-integration",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "axios": "^1.2.0"
+  }
+}
+
+6. Exemplo de Implementação (Node + Express)
+
+Abaixo, um exemplo minimalista de como criar uma rota /webhook/appmax que recebe os eventos e integra com a Shopify via API REST. Ajuste conforme suas necessidades.
+
+// server.js
+
+const express = require('express');
+const axios = require('axios');
+
+const app = express();
+app.use(express.json());
+
+// Substitua pelos dados da sua loja Shopify:
+const SHOPIFY_ACCESS_TOKEN = "SEU_ACCESS_TOKEN_AQUI";
+const SHOPIFY_STORE_DOMAIN = "sualoja.myshopify.com"; // Ex.: seudominio.myshopify.com
+
+// 1) Rota para receber webhooks da Appmax
+app.post('/webhook/appmax', async (req, res) => {
+  try {
+    const eventType = req.body.event;  // Ex.: "OrderApproved", "OrderPaid"
+    const data = req.body.data;        // Dados do pedido, cliente etc.
+
+    // Verificar qual evento foi disparado
+    switch (eventType) {
+      case 'OrderApproved':
+      case 'OrderPaid':
+        // Exemplo: criar ou atualizar pedido no Shopify
+        await createOrUpdateShopifyOrder(data);
+        break;
+
+      case 'PaymentNotAuthorized':
+        // Exemplo: cancelar pedido no Shopify
+        await cancelShopifyOrder(data);
+        break;
+
+      case 'OrderRefund':
+        // Exemplo: processar reembolso
+        await refundShopifyOrder(data);
+        break;
+
+      default:
+        console.log(`Evento não tratado: ${eventType}`);
+    }
+
+    // Responde à Appmax que o webhook foi processado
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    console.error('Erro ao processar webhook:', error);
+    // Retorna 500 para indicar falha (a Appmax pode reenviar)
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 2) Função para criar ou atualizar pedido na Shopify
+async function createOrUpdateShopifyOrder(orderData) {
+  // Mapeie os produtos do "orderData" para "line_items" da Shopify
+  let lineItems = [];
+
+  if (orderData.bundles && Array.isArray(orderData.bundles)) {
+    orderData.bundles.forEach(bundle => {
+      if (bundle.products) {
+        bundle.products.forEach(prod => {
+          lineItems.push({
+            // No API REST, "title" é usado em vez de "name"
+            title: prod.name,
+            quantity: prod.quantity || 1,
+            price: prod.price || "0.00",
+          });
+        });
+      }
+    });
+  }
+
+  // Exemplo de payload para criar pedido
+  const payload = {
+    order: {
+      line_items: lineItems,
+      // Defina o status financeiro do pedido
+      financial_status: "paid", 
+      // Valor total (depende do que você quer usar: total_products + freight_value, etc.)
+      total_price: orderData.total || "0.00",
+      currency: "BRL",
+
+      // Você pode usar "note" ou "note_attributes" para guardar informações da Appmax
+      note: `Pedido Appmax #${orderData.id}`,
+      
+      // Criar/associar cliente:
+      customer: {
+        first_name: orderData.customer?.firstname || "",
+        last_name: orderData.customer?.lastname || "",
+        email: orderData.customer?.email || "",
+      },
+    }
+  };
+
+  // Chamada POST para criar um novo pedido no Shopify
+  await axios.post(
+    `https://${SHOPIFY_STORE_DOMAIN}/admin/api/2023-01/orders.json`,
+    payload,
+    {
+      headers: {
+        "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+
+  console.log(`Pedido Appmax #${orderData.id} criado na Shopify`);
+}
+
+// 3) Função para cancelar pedido na Shopify
+async function cancelShopifyOrder(orderData) {
+  // Exemplo: primeiro você deve encontrar o pedido criado na Shopify
+  // A busca pode ser feita via "/orders.json?note=Pedido+Appmax+%23234" ou usar "graphQL".
+  // Ao encontrar, cancele via /orders/{id}/cancel.json
+
+  console.log(`Cancelando pedido Appmax #${orderData.id} (implementação necessária)`);
+}
+
+// 4) Função para processar reembolso na Shopify
+async function refundShopifyOrder(orderData) {
+  // Semelhante ao cancelamento, você precisa localizar o pedido e criar um "refund" via API.
+  console.log(`Reembolsando pedido Appmax #${orderData.id} (implementação necessária)`);
+}
+
+// Inicia o servidor na porta desejada
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Servidor rodando na porta ${PORT}`);
+});
+
+Observações Importantes
+
+    Evitar Duplicidade: A Appmax pode reenviar um webhook se não receber confirmação ou em outros cenários.
+        Você pode armazenar no Shopify (em note ou metafields) o ID do pedido Appmax para saber se já criou aquele pedido.
+        Assim, se o webhook chegar novamente, você verifica se o pedido Appmax já existe e apenas faz updates de status ao invés de criar um novo.
+
+    Manuseio de Status: A Shopify tem fluxos próprios (por ex. financial_status, fulfillment_status). Você pode mapear os status da Appmax para esses status no Shopify de acordo com a sua regra de negócio.
+
+    Validação de Segurança:
+        A Appmax não possui, por padrão, uma assinatura HMAC. Se desejar, você pode restringir o acesso por IP ou incluir um token (ex.: ?secret=XYZ) na URL e verificar no servidor antes de processar.
+
+7. Testando a Integração
+
+    Ambiente de Homologação da Appmax (se disponível) ou crie pedidos de teste em produção.
+    Quando o pedido mudar de status (p. ex., pagamento aprovado), verifique se seu servidor recebeu o webhook (console.log, logs etc.).
+    Confirme se o pedido foi criado (ou atualizado) corretamente na Shopify.
+    Verifique os logs do servidor (caso haja erros, corrija e repita).
+
+8. Possíveis Melhores Práticas e Extensões
+
+    Fila Assíncrona: Para alto volume de pedidos, considere usar filas (RabbitMQ, SQS etc.) para processar webhooks sem bloquear a resposta.
+    Armazenar Dados: Você pode manter um pequeno banco de dados (MySQL, MongoDB etc.) para relacionar id da Appmax com order_id da Shopify.
+    Tratamento de Erros: Se a API da Shopify retornar erro, decida se enviará 200 ou outro status para a Appmax (para que ela tente reenviar).
+
+9. Conclusão
+
+Seguindo estes passos, você terá um programa em Node.js que:
+
+    Recebe Webhooks da Appmax em /webhook/appmax.
+    Processa os dados (pedido, status etc.).
+    Interage com a Shopify Admin API para criar/atualizar pedidos de acordo com o status recebido.
+    Responde com 200 OK, garantindo que a Appmax reconheça o processamento bem-sucedido.
+
+Dessa forma, toda alteração de status de pedido na Appmax (pagamento, aprovação, cancelamento, reembolso) será refletida em tempo real na sua loja Shopify, sem depender de qualquer recurso do WooCommerce ou outro sistema.
+Referências Úteis
+
+    API da Shopify:
+    Shopify Developers - Admin API
+    Documentação da Appmax:
+    http://docs.appmax.com.br/api/ (Seção de Webhooks)
+    Eventos de Webhook da Appmax:
+    OrderApproved, OrderPaid, PaymentNotAuthorized, OrderRefund, OrderUpSold, etc., descritos no documento oficial.

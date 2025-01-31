@@ -1,0 +1,1860 @@
+                                                                                         
+
+  Integração da API V3 com a Appmax
+        Neste documento, serão listados os retornos da API, com seus respectivos sucessos
+e erros referentes a integração API Appmax V3.
+
+       OBS: Esse documento é interno da Appmax, não compartilhe sem a devida
+autorização.
+       A documentação para integração se encontra no link: http://docs.appmax.com.br/api/
+
+
+1. Cliente
+        Esta rota será utilizada para criar/atualizar um cliente com ou sem um produto
+vinculado, com base no firstname + lastname
+        Caso seja enviado somente os campos obrigatórios, o cliente é considerado um
+"carrinho abandonado", podendo ser atualizado posteriormente, pela mesma rota.
+
+       Tipo de requisição: POST.
+       Rota: https://homolog.sandboxappmax.com.br/api/v3/customer
+
+
+     1.1.     Retorno com sucesso:
+
+       Este é o retorno de um cadastro completo quando o cliente é criado com sucesso.
+
+       HTTP CODE: 200.
+       {
+            "success": true,
+            "text": "OK",
+            "data": {
+                "id": 8,
+                "firstname": "teste",
+                "lastname": "teste",
+                "email": "teste@teste.com",
+                "telephone": "11111111111",
+                "hash": "63459012021171-1637153676-0650744001637153676",
+                "postcode": "01010000",
+                "address_street": "Rua São Bento",
+                "address_street_number": "111",
+                "address_street_complement": "Bloco 7",
+                "address_street_district": "Centro",
+                "address_city": "São Paulo",
+                "address_state": "SP",
+                "document_number": null,
+                "site_id": 3,
+                "ip": "127.0.0.1",
+                "custom_txt": "Tênis de Corrida 39",
+                "created_at": "2021-11-17 09:54:36",
+                "updated_at": "2021-11-17 09:54:36",
+                "uf": "SP"
+              },
+           "status": 200
+       }
+
+       Este é o retorno de um cadastro básico quando o cliente é criado com sucesso.
+
+       HTTP CODE: 200.
+       {
+           "success": true,
+                                                                                     
+       "text": "OK",
+       "data": {
+           "id": 20,
+           "firstname": "teste",
+           "lastname": "testes",
+           "email": "teste@teste.com",
+           "telephone": "11111111111",
+           "hash": "11756112021181-1637265431-0664817001637265431",
+           "postcode": null,
+           "address_street": null,
+           "address_street_number": null,
+           "address_street_complement": null,
+           "address_street_district": null,
+           "address_city": null,
+           "address_state": null,
+           "document_number": null,
+           "site_id": 17,
+           "ip": "172.18.0.1",
+           "custom_txt": "Tênis de Corrida 39",
+           "created_at": "2021-11-18 16:57:11",
+           "updated_at": "2021-11-18 16:57:11",
+           "uf": null
+       },
+       "status": 200
+   }
+
+
+  1.2.     Retorno com erro:
+   Este erro ocorre por não enviar os dados para campos obrigatórios.
+   HTTP CODE: 403.
+   {
+         "success": false,
+         "text": "The given data failed to pass validation.",
+         "data": {
+             "firstname": [
+                 "O campo Nome é obrigatório."
+             ],
+             "email": [
+                 "O campo E-mail é obrigatório."
+             ],
+             "telephone": [
+                 "O campo Celular é obrigatório."
+             ],
+             "address_state": [
+                 "O campo Estado não deverá conter mais de 2 caracteres."
+             ]
+         },
+         "status": 403
+   }
+
+
+2. Pedido
+   Esta rota será utilizada para criar um pedido.
+
+   Tipo de requisição: POST.
+   Rota: https://homolog.sandboxappmax.com.br/api/v3/order
+   Observação: O campo no request "external_id" é opcional e caso preenchido, será
+   salvo na coluna "invoice_id" da tabela orders.
+                                                                        
+
+2.1. Total Carrinho
+ Será criado um pedido com apenas o valor total do carrinho.
+
+ Request:
+ {
+     "ip": "192.0.0.1",
+     "shipping": 39.9,
+     "discount": 0,
+     "total": 19.95,
+     "products": [
+        {
+          "sku": "9000010",
+          "name": "My product 1",
+          "qty": 1
+        }
+     ],
+     "customer_id": "1200",
+     "freight_type": "PAC",
+     "external_id": null
+ }
+
+
+
+     2.1.1.    Retorno com sucesso:
+ Este é o retorno quando um pedido é criado com sucesso.
+
+ HTTP CODE: 200.
+ {
+     "success": true,
+     "text": "OK",
+     "data": {
+         "id": 28,
+         "customer_id": 18,
+         "total_products": 750,
+         "status": "pendente",
+         "freight_value": 39.9,
+         "payment_type": null,
+         "card_brand": null,
+         "partner_total": 0,
+         "partner_affiliate_total": 0,
+         "billet_date_overdue": "",
+         "billet_url": null,
+         "billet_digitable_line": null,
+         "order_billet_payment_code": null,
+         "installments": 1,
+         "paid_at": null,
+         "refunded_at": null,
+         "integrated_at": null,
+         "created_at": "2021-11-17 12:19:39",
+         "discount": 0,
+         "interest": 0,
+         "upsell_order_id": null,
+         "origin": "API",
+         "seller_name": null,
+         "total": 789.9,
+         "customer": {
+             "id": 18,
+             "firstname": "teste",
+             "lastname": "teste",
+             "email": "teste@teste.com",
+             "telephone": "11111111111",
+             "hash": "10001112021171-1637157601-0951160001637157601",
+                                                         
+   "postcode": "01010000",
+   "address_street": "Rua São Bento",
+   "address_street_number": "111",
+   "address_street_complement": "Bloco 7",
+   "address_street_district": "Centro",
+   "address_city": "São Paulo",
+   "address_state": "SP",
+   "document_number": null,
+   "site_id": 17,
+   "created_at": "2021-11-17 11:00:01",
+   "uf": "SP",
+   "last_visit": {
+       "id": 110,
+       "visitor_id": "",
+       "customer_id": 18,
+       "utm_source": "google",
+       "utm_medium": "cpc",
+       "utm_campaign": "black-friday",
+       "utm_term": "logo-link",
+       "utm_content": "tenis-corrida",
+       "referrer": null,
+       "custom_var_k1": null,
+       "custom_var_v1": null,
+       "custom_var_k2": null,
+       "custom_var_v2": null,
+       "custom_var_k3": null,
+       "custom_var_v3": null,
+       "custom_var_k4": null,
+       "custom_var_v4": null,
+       "custom_var_k5": null,
+       "custom_var_v5": null,
+       "click_id": null,
+       "created_at": "2021-11-17 11:00:02",
+       "updated_at": "2021-11-17 11:00:02",
+       "last_page": null
+   },
+   "interested_bundle": [],
+   "visited_url": ""
+},
+"bundles": [
+    {
+        "id": 25,
+        "name": "My product 1",
+        "description": "",
+        "production_cost": "R$ 0,00",
+        "identifier": null,
+        "products": [
+            {
+                "id": 18,
+                "sku": "123123",
+                "name": "My product 1",
+                "description": "",
+                "price": "250.00",
+                "quantity": 1,
+                "image": "http://sistema.local:8080/",
+                "external_id": null
+            }
+        ]
+    },
+    {
+        "id": 26,
+        "name": "My product 2",
+        "description": "",
+        "production_cost": "R$ 0,00",
+        "identifier": null,
+        "products": [
+            {
+                                                                                
+                            "id": 19,
+                            "sku": "234234",
+                            "name": "My product 2",
+                            "description": "",
+                            "price": "250.00",
+                            "quantity": 2,
+                            "image": "http://sistema.local:8080/",
+                            "external_id": null
+                       }
+                   ]
+            }
+        ],
+        "products": [],
+        "visit": {
+            "utm_source": "google",
+            "utm_medium": "cpc",
+            "utm_campaign": "black-friday",
+            "affiliate_id": null
+        },
+        "company_name": "Company Teste",
+        "company_cnpj": "00.000.000/0000-00",
+        "company_email": "test@example.com",
+        "co_production_commission": null,
+        "affiliate_comission": [],
+        "traffic_description": null,
+        "full_payment_amount": "789.90",
+        "additional_hash":
+ "93912112021171-1637162379-0889708001637162379"
+    },
+    "status": 200
+ }
+
+
+     2.1.2.    Retorno com erro:
+ Este erro ocorre por não enviar os dados do campo Cliente que é obrigatório.
+
+ HTTP CODE: 403.
+ {
+     "success": false,
+     "text": "The given data failed to pass validation.",
+     "data": {
+         "customer_id": [
+             "O campo Cliente é obrigatório."
+         ]
+     },
+     "status": 403
+ }
+
+
+
+2.2. Total Carrinho com Pesos
+ Será criado um pedido com um valor total para cada produto.
+ Request:
+ {
+     "ip": "192.0.0.1",
+     "shipping": 39.9,
+     "discount": 0,
+     "total": 109.95,
+     "products": [
+        {
+          "sku": "9000010",
+          "name": "My product 1",
+          "qty": 1,
+          "weight": 0.95
+                                                                       
+       }
+    ],
+    "customer_id": "1200",
+    "freight_type": "PAC",
+    "external_id": null
+}
+
+
+    2.2.1.   Retorno com sucesso:
+Este é o retorno quando um pedido é criado com sucesso.
+
+HTTP CODE: 200.
+{
+    "success": true,
+    "text": "OK",
+    "data": {
+        "id": 37,
+        "customer_id": 18,
+        "total_products": 750,
+        "status": "pendente",
+        "freight_value": 39.9,
+        "payment_type": null,
+        "card_brand": null,
+        "partner_total": 0,
+        "partner_affiliate_total": 0,
+        "billet_date_overdue": "",
+        "billet_url": null,
+        "billet_digitable_line": null,
+        "order_billet_payment_code": null,
+        "installments": 1,
+        "paid_at": null,
+        "refunded_at": null,
+        "integrated_at": null,
+        "created_at": "2021-11-17 12:47:58",
+        "discount": 0,
+        "interest": 0,
+        "upsell_order_id": null,
+        "origin": "API",
+        "seller_name": null,
+        "total": 789.9,
+        "customer": {
+            "id": 18,
+            "firstname": "teste",
+            "lastname": "teste",
+            "email": "teste@teste.com",
+            "telephone": "11111111111",
+            "hash": "10001112021171-1637157601-0951160001637157601",
+            "postcode": "01010000",
+            "address_street": "Rua São Bento",
+            "address_street_number": "111",
+            "address_street_complement": "Bloco 7",
+            "address_street_district": "Centro",
+            "address_city": "São Paulo",
+            "address_state": "SP",
+            "document_number": null,
+            "site_id": 17,
+            "created_at": "2021-11-17 11:00:01",
+            "uf": "SP",
+            "last_visit": {
+                "id": 110,
+                "visitor_id": "",
+                "customer_id": 18,
+                "utm_source": "google",
+                "utm_medium": "cpc",
+                "utm_campaign": "black-friday",
+                                                         
+       "utm_term": "logo-link",
+       "utm_content": "tenis-corrida",
+       "referrer": null,
+       "custom_var_k1": null,
+       "custom_var_v1": null,
+       "custom_var_k2": null,
+       "custom_var_v2": null,
+       "custom_var_k3": null,
+       "custom_var_v3": null,
+       "custom_var_k4": null,
+       "custom_var_v4": null,
+       "custom_var_k5": null,
+       "custom_var_v5": null,
+       "click_id": null,
+       "created_at": "2021-11-17 11:00:02",
+       "updated_at": "2021-11-17 11:00:02",
+       "last_page": null
+   },
+   "interested_bundle": [],
+   "visited_url": ""
+},
+"bundles": [
+    {
+        "id": 25,
+        "name": "My product 1",
+        "description": "",
+        "production_cost": "R$ 0,00",
+        "identifier": null,
+        "products": [
+            {
+                "id": 18,
+                "sku": "123123",
+                "name": "My product 1",
+                "description": "",
+                "price": "375.00",
+                "quantity": 1,
+                "image": "http://sistema.local:8080/",
+                "external_id": null
+            }
+        ]
+    },
+    {
+        "id": 26,
+        "name": "My product 2",
+        "description": "",
+        "production_cost": "R$ 0,00",
+        "identifier": null,
+        "products": [
+            {
+                "id": 19,
+                "sku": "234234",
+                "name": "My product 2",
+                "description": "",
+                "price": "187.50",
+                "quantity": 2,
+                "image": "http://sistema.local:8080/",
+                "external_id": null
+            }
+        ]
+    }
+],
+"products": [],
+"visit": {
+    "utm_source": "google",
+    "utm_medium": "cpc",
+    "utm_campaign": "black-friday",
+    "affiliate_id": null
+                                                                 
+        },
+        "company_name": "Company Teste",
+        "company_cnpj": "00.000.000/0000-00",
+        "company_email": "test@example.com",
+        "co_production_commission": null,
+        "affiliate_comission": [],
+        "traffic_description": null,
+        "full_payment_amount": "789.90",
+        "additional_hash":
+ "85742112021171-1637164078-0358757001637164078"
+    },
+    "status": 200
+ }
+
+
+
+2.3. Valor Unitário dos Produtos
+ Será criado um pedido com o valor unitário para cada produto.
+ Request:
+ {
+     "ip": "192.0.0.1",
+     "shipping": 39.9,
+     "discount": 0,
+     "products": [
+        {
+          "sku": "9000010",
+          "name": "My product 1",
+          "qty": 1
+        },
+        {
+          "sku": "9000011",
+          "name": "My product 2",
+          "qty": 1,
+          "price": 12.25,
+          "digital_product": 1
+        }
+     ],
+     "customer_id": "1200",
+     "freight_type": "PAC",
+     "external_id": null
+ }
+
+
+     2.3.1.    Retorno com sucesso:
+ Este é o retorno quando um pedido é criado com sucesso.
+
+ HTTP CODE: 200.
+ {
+     "success": true,
+     "text": "OK",
+     "data": {
+         "id": 38,
+         "customer_id": 18,
+         "total_products": 750,
+         "status": "pendente",
+         "freight_value": 39.9,
+         "payment_type": null,
+         "card_brand": null,
+         "partner_total": 0,
+         "partner_affiliate_total": 0,
+         "billet_date_overdue": "",
+         "billet_url": null,
+         "billet_digitable_line": null,
+         "order_billet_payment_code": null,
+                                                               
+"installments": 1,
+"paid_at": null,
+"refunded_at": null,
+"integrated_at": null,
+"created_at": "2021-11-17 14:13:41",
+"discount": 0,
+"interest": 0,
+"upsell_order_id": null,
+"origin": "API",
+"seller_name": null,
+"total": 789.9,
+"customer": {
+    "id": 18,
+    "firstname": "teste",
+    "lastname": "teste",
+    "email": "teste@teste.com",
+    "telephone": "11111111111",
+    "hash": "10001112021171-1637157601-0951160001637157601",
+    "postcode": "01010000",
+    "address_street": "Rua São Bento",
+    "address_street_number": "111",
+    "address_street_complement": "Bloco 7",
+    "address_street_district": "Centro",
+    "address_city": "São Paulo",
+    "address_state": "SP",
+    "document_number": null,
+    "site_id": 17,
+    "created_at": "2021-11-17 11:00:01",
+    "uf": "SP",
+    "last_visit": {
+        "id": 110,
+        "visitor_id": "",
+        "customer_id": 18,
+        "utm_source": "google",
+        "utm_medium": "cpc",
+        "utm_campaign": "black-friday",
+        "utm_term": "logo-link",
+        "utm_content": "tenis-corrida",
+        "referrer": null,
+        "custom_var_k1": null,
+        "custom_var_v1": null,
+        "custom_var_k2": null,
+        "custom_var_v2": null,
+        "custom_var_k3": null,
+        "custom_var_v3": null,
+        "custom_var_k4": null,
+        "custom_var_v4": null,
+        "custom_var_k5": null,
+        "custom_var_v5": null,
+        "click_id": null,
+        "created_at": "2021-11-17 11:00:02",
+        "updated_at": "2021-11-17 11:00:02",
+        "last_page": null
+    },
+    "interested_bundle": [],
+    "visited_url": ""
+},
+"bundles": [
+    {
+        "id": 25,
+        "name": "My product 1",
+        "description": "",
+        "production_cost": "R$ 0,00",
+        "identifier": null,
+        "products": [
+            {
+                "id": 18,
+                                                                                   
+                              "sku": "123123",
+                              "name": "My product 1",
+                              "description": "",
+                              "price": "375.00",
+                              "quantity": 1,
+                              "image": "http://sistema.local:8080/",
+                              "external_id": null
+                         }
+                    ]
+               },
+               {
+                    "id": 26,
+                    "name": "My product 2",
+                    "description": "",
+                    "production_cost": "R$ 0,00",
+                    "identifier": null,
+                    "products": [
+                        {
+                            "id": 19,
+                            "sku": "234234",
+                            "name": "My product 2",
+                            "description": "",
+                            "price": "187.50",
+                            "quantity": 2,
+                            "image": "http://sistema.local:8080/",
+                            "external_id": null
+                        }
+                    ]
+             }
+         ],
+         "products": [],
+         "visit": {
+             "utm_source": "google",
+             "utm_medium": "cpc",
+             "utm_campaign": "black-friday",
+             "affiliate_id": null
+         },
+         "company_name": "Company Teste",
+         "company_cnpj": "00.000.000/0000-00",
+         "company_email": "test@example.com",
+         "co_production_commission": null,
+         "affiliate_comission": [],
+         "traffic_description": null,
+         "full_payment_amount": "789.90",
+         "additional_hash":
+  "14314112021171-1637169221-0755655001637169221"
+     },
+     "status": 200
+  }
+
+
+3. Pagamentos
+  Esta rota será utilizada para criar uma transação.
+
+
+ 3.1. Cartão de crédito
+  Será criado uma transação utilizando cartão de crédito como meio de pagamento.
+
+  Tipo de requisição: POST.
+  Rota: https://homolog.sandboxappmax.com.br/api/v3/payment/credit-card
+                                                                              
+    3.1.1.    Retorno com sucesso:
+Este é o retorno quando uma transação com cartão de crédito é criada com sucesso.
+
+HTTP CODE: 200.
+{
+    "success": true,
+    "text": "Transação efetuada com sucesso",
+    "data": {
+        "type": "CreditCard",
+        "pay_reference": "test_localhost_4_b851c",
+        "upsell_hash":
+"81443112021171-1637167458-0364190001637167458"
+    },
+    "status": 200
+}
+
+
+    3.1.2.    Retorno com erro:
+Este erro ocorre por não enviar os dados para campos obrigatórios:
+
+HTTP CODE: 403.
+{
+    "success": false,
+    "text": "The given data failed to pass validation.",
+    "data": {
+        "cart.order_id": [
+            "O campo cart.order id é obrigatório quanto cart.products
+não está presente."
+        ],
+        "customer.firstname": [
+            "O campo customer.firstname é obrigatório quando nenhum
+dos cart.order id / customer.customer id está presente."
+        ],
+        "customer.lastname": [
+            "O campo customer.lastname é obrigatório quando nenhum
+dos cart.order id / customer.customer id está presente."
+        ],
+        "customer.email": [
+            "O campo customer.email é obrigatório quando nenhum dos
+cart.order id / customer.customer id está presente."
+        ],
+        "customer.telephone": [
+            "O campo customer.telephone é obrigatório quando nenhum
+dos cart.order id / customer.customer id está presente."
+        ],
+        "customer.postcode": [
+            "O campo customer.postcode é obrigatório quando nenhum
+dos cart.order id / customer.customer id está presente."
+        ],
+        "customer.address_street": [
+            "O campo customer.address street é obrigatório quando
+nenhum dos cart.order id / customer.customer id está presente."
+        ],
+        "customer.address_street_number": [
+            "O campo customer.address street number é obrigatório
+quando nenhum dos cart.order id / customer.customer id está
+presente."
+        ],
+        "customer.address_street_district": [
+            "O campo customer.address street district é obrigatório
+quando nenhum dos cart.order id / customer.customer id está
+presente."
+                                                                      
+        ],
+        "customer.address_city": [
+            "O campo customer.address city é obrigatório quando
+nenhum dos cart.order id / customer.customer id está presente."
+        ],
+        "customer.address_state": [
+            "O campo customer.address state é obrigatório quando
+nenhum dos cart.order id / customer.customer id está presente."
+        ],
+        "payment.CreditCard.number": [
+            "O campo payment. credit card.number é obrigatório quando
+nenhum dos payment. credit card.upsell hash / payment. credit
+card.token está presente."
+        ],
+        "payment.CreditCard.name": [
+            "O campo payment. credit card.name é obrigatório quando
+nenhum dos payment. credit card.upsell hash / payment. credit
+card.token está presente."
+        ],
+        "payment.CreditCard.year": [
+            "O campo payment. credit card.year é obrigatório quando
+nenhum dos payment. credit card.upsell hash / payment. credit
+card.token está presente."
+        ],
+        "payment.CreditCard.month": [
+            "O campo payment. credit card.month é obrigatório quando
+nenhum dos payment. credit card.upsell hash / payment. credit
+card.token está presente."
+        ],
+        "payment.CreditCard.cvv": [
+            "O campo payment. credit card.cvv é obrigatório quando
+nenhum dos payment. credit card.upsell hash / payment. credit
+card.token está presente."
+        ],
+        "payment.CreditCard.document_number": [
+            "O campo payment. credit card.document number é
+obrigatório quando nenhum dos payment. credit card.upsell hash /
+payment. credit card.token está presente."
+        ],
+        "payment.CreditCard.installments": [
+            "O campo payment. credit card.installments é
+obrigatório."
+        ]
+    },
+    "status": 403
+}
+
+Este erro ocorre quando um pedido já se encontra pago ou cancelado.
+HTTP CODE: 404
+{
+    "success": false,
+    "text": "Order Already Paid", #"text": "Order is Cancelled",
+    "data": {
+        "order": {
+            "id": 4,
+            "site_id": 2,
+            "customer_id": 14,
+            "total": 24.99,
+            "status": "aprovado",
+            "freight_value": 0,
+            "freight_type": "PAC",
+            "freight_cost": null,
+            "freight_new_type": null,
+            "freight_calculated": 0,
+            "tracking": null,
+            "payment_type": "MundiPagg",
+                                                                                    
+                  "payment_type_collection": "CreditCard",
+                  "installments": 1,
+                  "origin": "API",
+                  "user_id": 1,
+                  "paid_at": "2021-11-17 13:48:08",
+                  "refunded_at": null,
+                  "created_at": "2021-11-17 13:44:18",
+                  "updated_at": "2021-11-17 13:48:09",
+                  "discount": 0,
+                  "upsell_order_id": null,
+                  "interest": 0,
+                  "partner_total": 23.27,
+                  "partner_affiliate_total": 0,
+                  "integrated_at": null,
+                  "additional_hash":
+      "81443112021171-1637167458-0361387001637167458",
+                  "upsell_hash":
+      "81443112021171-1637167458-0364190001637167458",
+                  "infoproduct_antfraud": false,
+                  "coupon_id": null,
+                  "sub_total": 24.99
+              }
+          },
+          "status": 404
+      }
+
+      Este erro ocorre quando colocamos incorretamente mais de 3 dígitos no CVV
+      HTTP CODE: 400
+
+{
+    "success": false,
+    "text": "Transação não autorizada, motivo: O campo código de segurança
+para a bandeira Visa deve conter 3 dígitos.",
+    "data": {
+        "errorCode": null,
+        "message": "O campo código de segurança para a bandeira Visa deve
+conter 3 dígitos."
+    },
+    "status": 400
+}
+
+
+      Este erro ocorre quando colocamos é utilizado um cartão vencido para pagamento.
+      HTTP CODE: 400
+
+{
+    "success": false,
+    "text": "Transação não autorizada, motivo: Data de vencimento do cartão
+expirada.",
+    "data": {
+        "errorCode": null,
+        "message": "Data de vencimento do cartão expirada."
+    },
+    "status": 400
+}
+                                                                              
+ Este erro ocorre quando quando há algum problema de aprovação na adquirente.(ex
+ abaixo de simulação)
+ HTTP CODE: 401
+
+ {
+     "success": false,
+     "text": "Transação não autorizada, motivo: Transação de
+ simulação não autorizada",
+     "data": {
+         "errorCode": "1",   #código da adquirente
+         "message": "Transação de simulação não autorizada"
+     },
+     "status": 401
+ }
+
+
+3.2. Boleto
+ Será criado uma transação do tipo boleto.
+
+ Tipo de requisição: POST.
+ Rota: https://homolog.sandboxappmax.com.br/api/v3/payment/boleto
+
+
+     3.2.1.    Retorno com sucesso:
+ Este é o retorno quando uma transação com boleto é criada com sucesso.
+
+ HTTP CODE: 200.
+ {
+     "success": true,
+     "text": "Boleto emitido com sucesso! Tudo ocorreu conforme o
+ esperado.",
+     "data": {
+         "type": "Boleto",
+         "pay_reference": "6196373bfb7e996a13431bf3",
+         "pdf":
+ "https://dev-boletos.appmax.com.br/boleto/6196373bfb7e996a13431bf3",
+         "due_date": "2021-11-21",
+         "digitable_line":
+ "34191090080959047620716155530005488110000025990",
+         "boleto_payment_code":
+ "34191090080959047620716155530005488110000025990"
+     },
+     "status": 200
+ }
+
+
+     3.2.2.    Retorno com erro:
+ Este erro ocorre quando o pedido não é encontrado.
+ HTTP CODE: 404.
+ {
+      "success": false,
+      "text": "Order Payment error",
+      "data": {
+          "request": {
+              "attributes": {},
+              "request": {},
+              "query": {},
+              "server": {},
+              "files": {},
+                                                                   
+             "cookies": {},
+             "headers": {}
+        }
+    },
+    "status": 404
+}
+
+Este erro ocorre quando o campo está em branco.
+HTTP CODE: 403
+
+{
+    "success": false,
+    "text": "The given data failed to pass validation.",
+    "data": {
+        "cart.order_id": [
+            "O campo cart.order id é obrigatório quanto cart.products
+não está presente."
+        ],
+        "customer.firstname": [
+            "O campo customer.firstname é obrigatório quando nenhum
+dos cart.order id / customer.customer id está presente."
+        ],
+        "customer.lastname": [
+            "O campo customer.lastname é obrigatório quando nenhum
+dos cart.order id / customer.customer id está presente."
+        ],
+        "customer.email": [
+            "O campo customer.email é obrigatório quando nenhum dos
+cart.order id / customer.customer id está presente."
+        ],
+        "customer.telephone": [
+            "O campo customer.telephone é obrigatório quando nenhum
+dos cart.order id / customer.customer id está presente."
+        ],
+        "customer.postcode": [
+            "O campo customer.postcode é obrigatório quando nenhum
+dos cart.order id / customer.customer id está presente."
+        ],
+        "customer.address_street": [
+            "O campo customer.address street é obrigatório quando
+nenhum dos cart.order id / customer.customer id está presente."
+        ],
+        "customer.address_street_number": [
+            "O campo customer.address street number é obrigatório
+quando nenhum dos cart.order id / customer.customer id está
+presente."
+        ],
+        "customer.address_street_district": [
+            "O campo customer.address street district é obrigatório
+quando nenhum dos cart.order id / customer.customer id está
+presente."
+        ],
+        "customer.address_city": [
+            "O campo customer.address city é obrigatório quando
+nenhum dos cart.order id / customer.customer id está presente."
+        ],
+        "customer.address_state": [
+            "O campo customer.address state é obrigatório quando
+nenhum dos cart.order id / customer.customer id está presente."
+        ],
+        "payment.Boleto.document_number": [
+            "O campo payment. boleto.document number é obrigatório."
+        ]
+    },
+    "status": 403
+}
+                                                                             
+
+ Este erro ocorre quando o pedido já está pago ou cancelado.
+
+ HTTP CODE:404
+ {
+     "success": false,
+     "text": "Order Already Paid",
+     "data": {
+         "order": {
+             "id": 1,
+             "site_id": 2,
+             "customer_id": 1,
+             "total": 99.9,
+             "status": "aprovado",
+             "freight_value": 39.9,
+             "freight_type": "PAC",
+             "freight_cost": "39.90",
+             "freight_new_type": "PAC",
+             "freight_calculated": 1,
+             "tracking": null,
+             "payment_type": null,
+             "payment_type_collection": null,
+             "installments": 1,
+             "origin": null,
+             "user_id": null,
+             "paid_at": null,
+             "refunded_at": null,
+             "created_at": "2021-10-19 12:11:35",
+             "updated_at": "2021-10-19 12:11:40",
+             "discount": 0,
+             "upsell_order_id": null,
+             "interest": 0,
+             "partner_total": 0,
+             "partner_affiliate_total": 0,
+             "integrated_at": null,
+             "additional_hash":
+ "53112112020191-1634656295-0709626001634656295",
+             "upsell_hash":
+ "53112112020191-1634656295-0712010001634656295",
+             "infoproduct_antfraud": false,
+             "coupon_id": null,
+             "sub_total": 139.8
+         }
+     },
+     "status": 404
+ }
+
+
+
+3.3. PIX
+ Será criado uma transação do tipo PIX.
+
+ Tipo de requisição: POST.
+ Rota: https://homolog.sandboxappmax.com.br/api/v3/payment/pix
+
+
+     3.3.1.    Retorno com sucesso:
+ Este é o retorno simulado quando uma transação com PIX é efetuada com sucesso.
+
+ HTTP CODE: 200.
+ {
+      "success": true,
+                                                                              
+    "text": "Transação efetuada com sucesso",
+    "data": {
+        "type": "Pix",
+        "pay_reference": "referencia de pagamento",
+        "pix_qrcode":
+"00020126360014BR.GOV.BCB.PIX0114+5541992082083520400005303986540580.
+005802BR5919Maria Silva6012Sao Paulo 62160512Pagamento32163040A2",
+        "pix_emv": "2341242134213421-3431241234-234122342134-234124",
+        "pix_creation_date": "2021-11-17 09:30:00",
+        "pix_expiration_date": "2021-11-17 09:30:00"
+    },
+    "status": 200
+}
+
+
+    3.3.2.    Retorno com erro:
+Este erro ocorre quando a configuração do pagamento com pix está incorreta.
+
+HTTP CODE:404.
+{
+    "success": null,
+    "text":"Client error: `POST
+https://pix.sandboxappmax.com.br/pixgateway/v1/transactions` resulted
+in a `401 Unauthorized`
+response:\n{\"status\":401,\"errors\":\"Ocorreu um problema
+interno\",\"message\":\"n\ão autorizado\"}\n",
+    "data": null,
+    "status": 404
+}
+
+Este erro foi causado por não enviar os dados dos campos obrigatórios.
+HTTP CODE: 403
+{
+    "success": false,
+    "text": "The given data failed to pass validation.",
+    "data": {
+        "cart.order_id": [
+            "O campo cart.order id é obrigatório quanto cart.products
+não está presente."
+        ],
+        "customer.firstname": [
+            "O campo customer.firstname é obrigatório quando nenhum
+dos cart.order id / customer.customer id está presente."
+        ],
+        "customer.lastname": [
+            "O campo customer.lastname é obrigatório quando nenhum
+dos cart.order id / customer.customer id está presente."
+        ],
+        "customer.email": [
+            "O campo customer.email é obrigatório quando nenhum dos
+cart.order id / customer.customer id está presente."
+        ],
+        "customer.telephone": [
+            "O campo customer.telephone é obrigatório quando nenhum
+dos cart.order id / customer.customer id está presente."
+        ],
+        "customer.postcode": [
+            "O campo customer.postcode é obrigatório quando nenhum
+dos cart.order id / customer.customer id está presente."
+        ],
+        "customer.address_street": [
+            "O campo customer.address street é obrigatório quando
+nenhum dos cart.order id / customer.customer id está presente."
+        ],
+                                                                                    
+              "customer.address_street_number": [
+                  "O campo customer.address street number é obrigatório
+      quando nenhum dos cart.order id / customer.customer id está
+      presente."
+              ],
+              "customer.address_street_district": [
+                  "O campo customer.address street district é obrigatório
+      quando nenhum dos cart.order id / customer.customer id está
+      presente."
+              ],
+              "customer.address_city": [
+                  "O campo customer.address city é obrigatório quando
+      nenhum dos cart.order id / customer.customer id está presente."
+              ],
+              "customer.address_state": [
+                  "O campo customer.address state é obrigatório quando
+      nenhum dos cart.order id / customer.customer id está presente."
+              ],
+              "payment.pix.document_number": [
+                  "O campo payment.pix.document number é obrigatório."
+              ]
+          },
+          "status": 403
+      }
+
+
+
+    3.4. Cartão de crédito Tokenizado
+      Será criado uma transação do tipo cartão de crédito tokenizado.
+
+      Tipo de requisição: POST.
+      Rota: https://homolog.sandboxappmax.com.br/api/v3/payment/credit-card
+
+       Obs: CVV é Obrigatório e não é demonstrado no exemplo de pagamento com
+cartão tokenizado.
+
+
+          3.4.1.    Retorno com sucesso:
+      Este é o retorno quando uma transação com cartão crédito tokenizado é criado com
+sucesso.
+
+HTTP CODE: 200.
+{
+          "success": true,
+          "text": "Transação efetuada com sucesso",
+          "data": {
+              "type": "CreditCard",
+              "pay_reference": "test_localhost_4_e7afd",
+              "upsell_hash":
+      "81443112021171-1637167458-0364190001637167458"
+          },
+          "status": 200
+      }
+
+
+          3.4.2.    Retorno com erro:
+      Este erro ocorre por não enviar os dados dos campos obrigatórios.
+
+      HTTP CODE: 403.
+      {
+                                                                                   
+          "success": false,
+          "text": "The given data failed to pass validation.",
+          "data": {
+              "payment.CreditCard.number": [
+                  "O campo payment. credit card.number é obrigatório quando
+      nenhum dos payment. credit card.upsell hash / payment. credit
+      card.token está presente."
+              ],
+              "payment.CreditCard.name": [
+                  "O campo payment. credit card.name é obrigatório quando
+      nenhum dos payment. credit card.upsell hash / payment. credit
+      card.token está presente."
+              ],
+              "payment.CreditCard.year": [
+                  "O campo payment. credit card.year é obrigatório quando
+      nenhum dos payment. credit card.upsell hash / payment. credit
+      card.token está presente."
+              ],
+              "payment.CreditCard.month": [
+                  "O campo payment. credit card.month é obrigatório quando
+      nenhum dos payment. credit card.upsell hash / payment. credit
+      card.token está presente."
+              ],
+              "payment.CreditCard.cvv": [
+                  "O campo payment. credit card.cvv é obrigatório quando
+      nenhum dos payment. credit card.upsell hash / payment. credit
+      card.token está presente."
+              ],
+              "payment.CreditCard.document_number": [
+                  "O campo payment. credit card.document number é
+      obrigatório quando nenhum dos payment. credit card.upsell hash /
+      payment. credit card.token está presente."
+              ],
+              "payment.CreditCard.installments": [
+                  "O campo payment. credit card.installments é
+      obrigatório."
+              ]
+          },
+          "status": 403
+      }
+
+
+
+   3.5. Hash de Upsell
+     Será criado uma transação do tipo hash de upsell.(Utilizando mesmo meio de
+pagamento anterior)
+
+      Tipo de requisição: POST.
+      Rota: https://homolog.sandboxappmax.com.br/api/v3/payment/credit-card
+
+
+          3.5.1.    Retorno com sucesso:
+      Este é o retorno quando uma transação com hash de upsell é criada com sucesso.
+
+      HTTP CODE 200.
+      {
+          "success": true,
+          "text": "Transação efetuada com sucesso",
+          "data": {
+              "type": "CreditCard",
+              "pay_reference": "test_localhost_7_UPSELL_6efab",
+              "upsell_hash":
+      "60630112021181-1637242566-0189687001637242566"
+                                                                                
+            },
+            "status": 200
+      }
+
+
+          3.5.2.     Retorno com erro:
+       Este erro ocorre quando o pedido de origem não é encontrado com o hash
+específico.
+
+      HTTP CODE 404.
+      {
+            "success": false,
+            "text": "Order Payment error - Origin order not found",
+            "data": {
+                "request": {
+                    "attributes": {},
+                    "request": {},
+                    "query": {},
+                    "server": {},
+                    "files": {},
+                    "cookies": {},
+                    "headers": {}
+                }
+            },
+            "status": 404
+      }
+
+      Este erro ocorre quando o pedido não é encontrado.
+      HTTP CODE: 404
+      {
+          "success": false,
+          "text": "Order Payment error - No query results for model
+      [App\\Entities\\Order].",
+          "data": {
+              "request": {
+                  "attributes": {},
+                  "request": {},
+                  "query": {},
+                  "server": {},
+                  "files": {},
+                  "cookies": {},
+                  "headers": {}
+              }
+          },
+          "status": 404
+      }
+
+
+4. Tokenização
+      Esta rota será utilizada para criar um token .
+
+      Tipo de requisição: POST.
+      Rota: https://homolog.sandboxappmax.com.br/api/v3/tokenize/card
+
+
+     4.1.     Retorno com sucesso:
+      Este é o retorno quando o token é criado com sucesso.
+
+      HTTP CODE: 201.
+      {
+                                                                        
+       "success": true,
+       "text": "Tokenize card Success.",
+       "data": {
+           "token": "5fe8e368d976447fb63493ac7dd05490"
+       },
+       "status": 201
+   }
+
+
+  4.2.    Retorno com erro:
+   Este erro ocorre por não enviar os dados dos campos obrigatórios.
+
+   HTTP CODE: 403.
+   {
+       "success": false,
+       "text": "The given data failed to pass validation.",
+       "data": {
+           "card.number": [
+               "O campo card.number é obrigatório."
+           ],
+           "card.name": [
+               "O campo card.name é obrigatório."
+           ],
+           "card.month": [
+               "O campo card.month é obrigatório."
+           ],
+           "card.year": [
+               "O campo card.year é obrigatório."
+           ],
+           "card.cvv": [
+               "O campo card.cvv é obrigatório."
+           ]
+       },
+       "status": 403
+   }
+
+
+5. UpSell
+   Esta rota será utilizada para criar um upsell de 1-clique.
+
+   Tipo de requisição: POST.
+   Rota: https://homolog.sandboxappmax.com.br/api/v3/order/upsell
+
+
+  5.1.    Retorno com sucesso:
+   Este é o retorno quando o upsell de 1-clique é criado com sucesso.
+
+   HTTP CODE: 200.
+   {
+      "success": true,
+      "text": "Upsell was successful.",
+      "data": {
+          "redirect_url":
+   "frontend.local/order/success-by-order?hash=05754112021150-1636135070
+   -0488945001636135070"
+      },
+      "status": 200
+   }
+                                                                            
+  5.2.    Retorno com erro:
+   Este erro ocorre por não encontrar um pedido.
+
+   HTTP CODE: 400.
+   {
+       "success": false,
+       "text": "Order not found.",
+       "data": 614,
+       "status": 400
+   }
+
+
+
+6. Estorno
+   Esta rota será utilizada para solicitar um estorno de um pedido.
+
+   Tipo de requisição: POST.
+   Rota: https://homolog.sandboxappmax.com.br/api/v3/refund
+
+
+ 6.1. Total
+   Será criada uma solicitação de estorno com o valor total de um pedido.
+
+
+       6.1.1.    Retorno com sucesso:
+   Este é o retorno quando o estorno de valor total é criado com sucesso.
+
+   HTTP CODE: 200.
+   {
+       "success": true,
+       "text": "OK",
+       "data": {
+           "order_id": 57,
+           "site_id": 17,
+           "user_id": 2,
+           "seller_id": null,
+           "type": 1,
+           "value": 114.9,
+           "hash_order": "15949012021181-1637239791-0216037001637239791",
+           "payment_type_collection": 1,
+           "status_order": "aprovado",
+           "requested_at": "2021-11-18 09:56:40",
+           "status": "pendente",
+           "updated_at": "2021-11-18 09:56:40",
+           "created_at": "2021-11-18 09:56:40",
+           "id": 10,
+           "order": {
+               "id": 57,
+               "site_id": 17,
+               "customer_id": 18,
+               "total": 75,
+               "status": "aprovado",
+               "freight_value": 39.9,
+               "freight_type": "PAC",
+               "freight_cost": null,
+               "freight_new_type": null,
+               "freight_calculated": 0,
+               "tracking": "",
+               "payment_type": "MundiPagg",
+                                                                           
+           "payment_type_collection": "CreditCard",
+           "installments": 12,
+           "origin": "API",
+           "user_id": null,
+           "paid_at": "2021-11-18 09:50:11",
+           "refunded_at": null,
+           "created_at": "2021-11-18 09:49:51",
+           "updated_at": "2021-11-18 09:55:01",
+           "discount": 0,
+           "upsell_order_id": null,
+           "interest": 0,
+           "partner_total": 106.97,
+           "partner_affiliate_total": 0,
+           "integrated_at": null,
+           "additional_hash":
+"15949012021181-1637239791-0218719001637239791",
+           "upsell_hash":
+"15949012021181-1637239791-0218830001637239791",
+           "infoproduct_antfraud": false,
+           "coupon_id": null,
+           "sub_total": 114.9,
+           "upsell_orders": [],
+           "upsell_order": null
+       },
+       "user": {
+           "id": 2,
+           "referrer_commission_setup_id": null,
+           "name": "Produtor teste",
+           "nickname": null,
+           "email": "produtor@test.com",
+           "phone": null,
+           "cpf": "19100000000",
+           "evolux_login": "",
+           "cashout_currency_id": 1,
+           "created_at": "2017-01-01 11:05:19",
+           "updated_at": "2021-11-05 10:14:37",
+           "deleted_at": null,
+           "affiliate_id": null,
+           "config_commission_group_id": null,
+           "locale": "pt-BR",
+           "type_id": 1,
+           "currency_id": 1,
+           "is_employee": 0,
+           "page_limit": 5,
+           "limit_refund_request_per_hour": 10,
+           "limit_refund_request_per_day": 100,
+           "is_sales_recovery": 0,
+           "active_sale_profile_id": 2,
+           "squad_id": null,
+           "intercom_enabled": 1,
+           "multi_company_balance": 0,
+           "created_by": 0
+       }
+   },
+   "status": 200
+}
+
+
+    6.1.2.    Retorno com erro:
+Este erro ocorre quando o pedido encontra-se com os status de pendente .
+
+HTTP CODE: 404.
+{
+    "success": false,
+    "text": "Pedido com status pendente",
+                                                                            
+     "data": null,
+     "status": 404
+ }
+
+
+
+6.2. Parcial
+ Será criada uma solicitação de estorno com o valor parcial de um pedido.
+
+
+     6.2.1.    Retorno com sucesso:
+ Este é o retorno quando o estorno de valor parcial é criado com sucesso.
+
+ HTTP CODE: 200.
+ {
+     "success": true,
+     "text": "OK",
+     "data": {
+         "order_id": 57,
+         "site_id": 17,
+         "user_id": 2,
+         "seller_id": null,
+         "type": 2,
+         "value": 5,
+         "hash_order": "15949012021181-1637239791-0216037001637239791",
+         "payment_type_collection": 1,
+         "status_order": "aprovado",
+         "requested_at": "2021-11-18 10:49:50",
+         "status": "pendente",
+         "updated_at": "2021-11-18 10:49:50",
+         "created_at": "2021-11-18 10:49:50",
+         "id": 11,
+         "user": {
+             "id": 2,
+             "referrer_commission_setup_id": null,
+             "name": "Produtor teste",
+             "nickname": null,
+             "email": "produtor@test.com",
+             "phone": null,
+             "cpf": "19100000000",
+             "evolux_login": "",
+             "cashout_currency_id": 1,
+             "created_at": "2017-01-01 11:05:19",
+             "updated_at": "2021-11-05 10:14:37",
+             "deleted_at": null,
+             "affiliate_id": null,
+             "config_commission_group_id": null,
+             "locale": "pt-BR",
+             "type_id": 1,
+             "currency_id": 1,
+             "is_employee": 0,
+             "page_limit": 5,
+             "limit_refund_request_per_hour": 10,
+             "limit_refund_request_per_day": 100,
+             "is_sales_recovery": 0,
+             "active_sale_profile_id": 2,
+             "squad_id": null,
+             "intercom_enabled": 1,
+             "multi_company_balance": 0,
+             "created_by": 0
+         },
+         "order": {
+             "id": 57,
+             "site_id": 17,
+                                                                                      
+                "customer_id": 18,
+                "total": 75,
+                "status": "aprovado",
+                "freight_value": 39.9,
+                "freight_type": "PAC",
+                "freight_cost": null,
+                "freight_new_type": null,
+                "freight_calculated": 0,
+                "tracking": "",
+                "payment_type": "MundiPagg",
+                "payment_type_collection": "CreditCard",
+                "installments": 12,
+                "origin": "API",
+                "user_id": null,
+                "paid_at": "2021-11-18 09:50:11",
+                "refunded_at": null,
+                "created_at": "2021-11-18 09:49:51",
+                "updated_at": "2021-11-18 10:46:50",
+                "discount": 0,
+                "upsell_order_id": null,
+                "interest": 0,
+                "partner_total": 106.97,
+                "partner_affiliate_total": 0,
+                "integrated_at": null,
+                "additional_hash":
+     "15949012021181-1637239791-0218719001637239791",
+                "upsell_hash":
+     "15949012021181-1637239791-0218830001637239791",
+                "infoproduct_antfraud": false,
+                "coupon_id": null,
+                "sub_total": 114.9
+            }
+        },
+        "status": 200
+     }
+
+
+         6.2.2.     Retorno com erro:
+     Este erro ocorre quando já existe uma solicitação de estorno.
+
+     HTTP CODE: 404.
+     {
+         "success": false,
+         "text": "Este pedido já possui uma solicitação de estorno.",
+         "data": null,
+         "status": 404
+     }
+
+
+
+7. Rastreio
+     Esta rota será utilizada para informar o código de rastreio.
+
+     Tipo de requisição: POST.
+     Rota: https://homolog.sandboxappmax.com.br/api/v3/order/delivery-tracking-code
+
+
+    7.1.    Retorno com sucesso:
+     Este é o retorno quando o código de rastreio é criado com sucesso.
+
+     HTTP CODE: 200.
+{
+                                                                                        
+   "success": true,
+   "text": "Store delivery tracking code",
+   "data": {
+       "order": {
+           "id": 57,
+           "site_id": 17,
+           "customer_id": 18,
+           "total": 75,
+           "status": "aprovado",
+           "freight_value": 39.9,
+           "freight_type": "PAC",
+           "freight_cost": null,
+           "freight_new_type": null,
+           "freight_calculated": 0,
+           "tracking": "",
+           "payment_type": "MundiPagg",
+           "payment_type_collection": "CreditCard",
+           "installments": 12,
+           "origin": "API",
+           "user_id": null,
+           "paid_at": "2021-11-18 09:50:11",
+           "refunded_at": null,
+           "created_at": "2021-11-18 09:49:51",
+           "updated_at": "2021-11-18 10:46:50",
+           "discount": 0,
+           "upsell_order_id": null,
+           "interest": 0,
+           "partner_total": 106.97,
+           "partner_affiliate_total": 0,
+           "integrated_at": null,
+           "additional_hash":
+"15949012021181-1637239791-0218719001637239791",
+           "upsell_hash": "15949012021181-1637239791-0218830001637239791",
+           "infoproduct_antfraud": false,
+           "coupon_id": null,
+           "sub_total": 114.9
+       }
+   },
+   "status": 200
+}
+
+
+     7.2.     Retorno com erro:
+       Este erro ocorre por não enviar os dados do campo delivery tracking code que é
+obrigatório.
+
+       HTTP CODE: 403.
+       {
+           "success": false,
+           "text": "The given data failed to pass validation.",
+           "data": {
+               "delivery_tracking_code": [
+                   "O campo delivery tracking code é obrigatório."
+               ]
+           },
+           "status": 403
+       }
+                                                                                  
+
+8. Parcelas + Cálculo de Taxa de
+   parcelamento
+   Esta rota será utilizada para informar, com taxa de parcelamento especificadas na
+   configuração de pagamento do site vinculado à chave de API, os valores de cada
+   parcela de acordo com um total e seu tipo de formatação selecionado.
+
+   Tipo de requisição: POST.
+   Rota: https://homolog.sandboxappmax.com.br/api/v3/payment/installments
+
+
+  8.1.    Retorno com sucesso:
+   Estes são os retornos de quando o cálculo das taxas de parcelamento nas parcelas
+   são retornados com sucesso.
+
+   PAYLOAD:
+
+   {
+       "access-token":"99503NR-ERT983H3-ASBDE030-334550FN3", // token de acesso
+   para utilização da API
+       "installments":12, // opcional, valor padrão 12, mínimo 1 e máximo 12
+       "total":100.00, // obrigatório, formato float (99.99)
+       "format":3 /* opcional, valor padrão 1
+                        - outros valores permitidos:
+                        1 (sem formatação)
+                        2 (formatado - parcela x valor da parcela com taxa de
+   parcelamento ex: 3 x R$ 355,25)
+                        3 (formatado - parcela valor total com taxa de
+   parcelamento)
+                   */
+   }
+
+
+
+
+   HTTP CODE: 200.
+
+   8.1.1 Ao inserir no campo "format" o valor 1, o retorno dentro de data, será com o
+   valor TOTAL (inserido no campo "total") COM taxa de parcelanento SEM formatação
+   de acordo com aquela parcela representada pela chave daquele campo:
+
+   {
+       "success": true,
+       "text": "success",
+       "data": {
+          "1": 100,
+          "2": 104.51000000000001,
+          "3": 106.04000000000001,
+          "4": 107.59,
+          "5": 109.15000000000001,
+          "6": 110.72,
+          "7": 112.31,
+          "8": 113.92,
+          "9": 115.54000000000001,
+          "10": 117.17,
+          "11": 118.81999999999999,
+          "12": 120.48
+                                                                                   
+     },
+     "status": 200
+ }
+
+ 8.1.2. Ao inserir no campo "format" o valor 2, o retorno dentro de data, será o valor
+ de cada parcela, com taxa de parcelamento e formatado, exemplo: "Parcela x R$
+ 99,99 ";
+
+ {
+     "success": true,
+     "text": "success",
+     "data": {
+        "1": "1 x R$ 100,00",
+        "2": "2 x R$ 52,26",
+        "3": "3 x R$ 35,35",
+        "4": "4 x R$ 26,90",
+        "5": "5 x R$ 21,83",
+        "6": "6 x R$ 18,45",
+        "7": "7 x R$ 16,04",
+        "8": "8 x R$ 14,24",
+        "9": "9 x R$ 12,84",
+        "10": "10 x R$ 11,72",
+        "11": "11 x R$ 10,80",
+        "12": "12 x R$ 10,04"
+     },
+     "status": 200
+ }
+
+ 8.1.3. Ao inserir no campo "format" o valor 3,será com o valor TOTAL (inserido no
+ campo "total") COM taxa de parcelamento, formatado, de acordo com aquela
+ parcela representada pela chave daquele campo;
+
+ {
+     "success": true,
+     "text": "success",
+     "data": {
+        "1": "R$ 100,00",
+        "2": "R$ 104,51",
+        "3": "R$ 106,04",
+        "4": "R$ 107,59",
+        "5": "R$ 109,15",
+        "6": "R$ 110,72",
+        "7": "R$ 112,31",
+        "8": "R$ 113,92",
+        "9": "R$ 115,54",
+        "10": "R$ 117,17",
+        "11": "R$ 118,82",
+        "12": "R$ 120,48"
+     },
+     "status": 200
+ }
+
+
+8.2.    Retorno com erro:
+ HTTP CODE: 404.
+
+ - Quando o site relacionado com a chave de API não possui configuração de
+ pagamento;
+
+ {
+     "success": false,
+     "text": "Nenhuma configuração de pagamento para este site",
+     "data": {
+        "request": {
+                                                                                     
+               "attributes": {},
+               "request": {},
+               "query": {},
+               "server": {},
+               "files": {},
+               "cookies": {},
+               "headers": {}
+          }
+       },
+       "status": 404
+   }
+
+   - Quando o campo "format" é preenchido com valores diferentes de 1, 2 e 3;
+   - Exceções variadas.
+
+   {
+       "success": false,
+       "text": "Erro ao calcular parcelamento",
+       "data": {
+          "request": {
+              "attributes": {},
+              "request": {},
+              "query": {},
+              "server": {},
+              "files": {},
+              "cookies": {},
+              "headers": {}
+          }
+       },
+       "status": 404
+   }
+
+   HTTP CODE: 400.
+
+   - Quando o campo "total" se encontra vazio.
+
+   {
+       "success": false,
+       "text": "Nenhum valor de pacote encontrado.",
+       "data": {
+          "request": {
+              "attributes": {},
+              "request": {},
+              "query": {},
+              "server": {},
+              "files": {},
+              "cookies": {},
+              "headers": {}
+          }
+       },
+       "status": 400
+   }
+
+
+
+9. Taxas de parcelamento
+   Essa rota será utilizada para retornar o valor da taxa de parcelamento especificada
+   pela configuração do parceiro para o site vinculado a chave de API, os valores são o
+   percentual a ser aplicado à quantidade de parcelas do pedido.
+                                                                              
+Tipo de requisição: GET.
+Rota: https://homolog.sandboxappmax.com.br/api/v3/payment/partner-rates
+Headers: ‘access-token’ : ‘99503NR-ERT983H3-ASBDE030-334550FN3’
+Exemplo curl:
+curl --location
+'https://homolog.sandboxappmax.com.br/api/v3/payment/partner-
+rates' --header 'access-token:
+99503NR-ERT983H3-ASBDE030-334550FN3' --data ''
+
+
+
+9.1. Retorno com sucesso:
+Estes são os retornos de quando o cálculo das taxas de parcelamento nas parcelas
+são retornados com sucesso
+HTTP CODE: 200
+{
+    "interest": "PP",
+    "data": {
+       "1": "0.00",
+       "2": "3.00",
+       "3": "3.00",
+       "4": "3.00",
+       "5": "3.00",
+       "6": "3.00",
+       "7": "3.00",
+       "8": "3.00",
+       "9": "3.00",
+       "10": "3.00",
+       "11": "3.00",
+       "12": "3.00"
+    }
+}
+
+Observação: essa requisição não necessita de de payload
+
