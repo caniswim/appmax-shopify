@@ -17,6 +17,7 @@ class ShopifyService {
     this.processing = false;
     this.lastRequestTime = 0;
     this.minRequestInterval = 500; // 500ms entre requisições (2 por segundo)
+    this.queueTimeout = null;
 
     // Adiciona interceptor para tratar erros
     this.client.interceptors.response.use(
@@ -75,9 +76,9 @@ class ShopifyService {
     const timeSinceLastRequest = now - this.lastRequestTime;
     
     if (timeSinceLastRequest < this.minRequestInterval) {
-      await new Promise(resolve => 
-        setTimeout(resolve, this.minRequestInterval - timeSinceLastRequest)
-      );
+      const waitTime = this.minRequestInterval - timeSinceLastRequest;
+      logger.info(`Aguardando ${waitTime}ms antes da próxima requisição`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
     }
 
     this.lastRequestTime = Date.now();
@@ -85,10 +86,26 @@ class ShopifyService {
   }
 
   async enqueueRequest(requestFn) {
+    logger.info(`Adicionando requisição à fila. Tamanho atual: ${this.requestQueue.length}`);
     return new Promise((resolve, reject) => {
-      this.requestQueue.push({ requestFn, resolve, reject });
-      this.processQueue();
+      this.requestQueue.push({ 
+        requestFn, 
+        resolve, 
+        reject,
+        timestamp: Date.now()
+      });
+      
+      // Garante que a fila será processada
+      this.ensureQueueProcessing();
     });
+  }
+
+  ensureQueueProcessing() {
+    if (!this.processing && !this.queueTimeout) {
+      this.queueTimeout = setTimeout(() => {
+        this.processQueue();
+      }, 100); // Inicia o processamento após 100ms se não estiver processando
+    }
   }
 
   async processQueue() {
@@ -97,26 +114,34 @@ class ShopifyService {
     }
 
     this.processing = true;
+    this.queueTimeout = null;
+
+    logger.info(`Iniciando processamento da fila. Itens: ${this.requestQueue.length}`);
 
     while (this.requestQueue.length > 0) {
-      const { requestFn, resolve, reject } = this.requestQueue.shift();
+      const request = this.requestQueue[0]; // Peek no primeiro item sem remover
+      const waitTime = Date.now() - request.timestamp;
+      
+      logger.info(`Processando requisição da fila. Tempo de espera: ${waitTime}ms`);
 
       try {
-        const result = await this.makeRequest(requestFn);
-        resolve(result);
+        const result = await this.makeRequest(request.requestFn);
+        this.requestQueue.shift(); // Remove apenas após sucesso
+        request.resolve(result);
       } catch (error) {
-        // Se for erro de rate limit, coloca de volta na fila
         if (error.response?.status === 429) {
-          logger.info('Rate limit atingido, recolocando requisição na fila');
-          this.requestQueue.unshift({ requestFn, resolve, reject });
-          await new Promise(resolve => setTimeout(resolve, this.minRequestInterval));
+          logger.info('Rate limit atingido, aguardando antes de tentar novamente');
+          await new Promise(resolve => setTimeout(resolve, this.minRequestInterval * 2));
           continue;
         }
-        reject(error);
+        
+        this.requestQueue.shift(); // Remove em caso de erro não recuperável
+        request.reject(error);
       }
     }
 
     this.processing = false;
+    logger.info('Processamento da fila concluído');
   }
 
   async createOrUpdateOrder({ appmaxOrder, status, financialStatus }) {
@@ -338,7 +363,7 @@ class ShopifyService {
   }
 
   async findOrderByAppmaxId(appmaxId) {
-    return this.makeRequest(async () => {
+    return this.enqueueRequest(async () => {
       try {
         const { data } = await this.client.get('/orders.json', {
           params: {
@@ -362,55 +387,38 @@ class ShopifyService {
   }
 
   async updateOrder(orderId, { appmaxOrder, status, financialStatus }) {
-    try {
-      // Atualiza apenas os campos permitidos
-      const updateData = {
-        order: {
-          id: orderId,
-          financial_status: this.mapFinancialStatus(financialStatus),
-          tags: [appmaxOrder.status, `appmax_status_${status}`],
-          note_attributes: [
-            {
-              name: 'appmax_id',
-              value: appmaxOrder.id.toString()
-            },
-            {
-              name: 'appmax_status',
-              value: appmaxOrder.status
-            },
-            {
-              name: 'appmax_payment_type',
-              value: appmaxOrder.payment_type || ''
-            }
-          ]
-        }
-      };
-
-      // Adiciona retry com backoff exponencial
-      let attempts = 0;
-      const maxAttempts = 3;
-      const baseDelay = 1000; // 1 segundo
-
-      while (attempts < maxAttempts) {
-        try {
-          const { data } = await this.client.put(`/orders/${orderId}.json`, updateData);
-          return data.order;
-        } catch (error) {
-          attempts++;
-          
-          if (attempts === maxAttempts || !this.isRetryableError(error)) {
-            throw error;
+    return this.enqueueRequest(async () => {
+      try {
+        const updateData = {
+          order: {
+            id: orderId,
+            financial_status: this.mapFinancialStatus(financialStatus),
+            tags: [appmaxOrder.status, `appmax_status_${status}`],
+            note_attributes: [
+              {
+                name: 'appmax_id',
+                value: appmaxOrder.id.toString()
+              },
+              {
+                name: 'appmax_status',
+                value: appmaxOrder.status
+              },
+              {
+                name: 'appmax_payment_type',
+                value: appmaxOrder.payment_type || ''
+              }
+            ]
           }
+        };
 
-          const delay = baseDelay * Math.pow(2, attempts - 1);
-          logger.info(`Tentativa ${attempts} falhou, aguardando ${delay}ms antes de tentar novamente`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-        }
+        logger.info(`Atualizando pedido Shopify #${orderId} para status ${status}`);
+        const { data } = await this.client.put(`/orders/${orderId}.json`, updateData);
+        return data.order;
+      } catch (error) {
+        logger.error('Erro ao atualizar pedido na Shopify:', error);
+        throw error;
       }
-    } catch (error) {
-      logger.error('Erro ao atualizar pedido na Shopify:', error);
-      throw error;
-    }
+    });
   }
 
   isRetryableError(error) {
