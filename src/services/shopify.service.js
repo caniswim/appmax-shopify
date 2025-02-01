@@ -310,6 +310,41 @@ class ShopifyService {
       }
     ];
 
+    // Adiciona informações de cartão de crédito se disponíveis
+    if (appmaxOrder.payment_type === 'CreditCard') {
+      const paymentDetails = [];
+      
+      if (appmaxOrder.card_brand) {
+        paymentDetails.push(`Bandeira: ${appmaxOrder.card_brand}`);
+      }
+      
+      if (appmaxOrder.installments) {
+        const installmentValue = (parseFloat(appmaxOrder.total) / appmaxOrder.installments).toFixed(2);
+        paymentDetails.push(`${appmaxOrder.installments}x de R$ ${installmentValue}`);
+      }
+
+      if (paymentDetails.length > 0) {
+        noteAttributes.push({
+          name: 'payment_details',
+          value: paymentDetails.join(' | ')
+        });
+      }
+
+      // Adiciona atributos individuais para facilitar consultas
+      if (appmaxOrder.card_brand) {
+        noteAttributes.push({
+          name: 'card_brand',
+          value: appmaxOrder.card_brand
+        });
+      }
+      if (appmaxOrder.installments) {
+        noteAttributes.push({
+          name: 'installments',
+          value: appmaxOrder.installments.toString()
+        });
+      }
+    }
+
     // Adiciona informações de boleto se disponíveis
     if (appmaxOrder.payment_type === 'Boleto') {
       if (appmaxOrder.billet_url) {
@@ -326,7 +361,7 @@ class ShopifyService {
       }
     }
 
-    return {
+    const orderData = {
       order: {
         line_items: lineItems,
         email: appmaxOrder.customer.email,
@@ -373,9 +408,15 @@ class ShopifyService {
           title: appmaxOrder.freight_type || 'Frete Padrão'
         }],
         note: `Pedido Appmax #${appmaxOrder.id}`,
-        note_attributes: noteAttributes
+        note_attributes: noteAttributes,
+        additional_details: appmaxOrder.payment_type === 'CreditCard' ? [
+          `Bandeira: ${appmaxOrder.card_brand || 'N/A'}`,
+          `Parcelas: ${appmaxOrder.installments || 1}x de R$ ${((parseFloat(appmaxOrder.total) || 0) / (appmaxOrder.installments || 1)).toFixed(2)}`
+        ] : []
       }
     };
+
+    return orderData;
   }
 
   async findOrderByAppmaxId(appmaxId) {
@@ -451,6 +492,41 @@ class ShopifyService {
           }
         ];
 
+        // Adiciona informações de cartão de crédito se disponíveis
+        if (appmaxOrder.payment_type === 'CreditCard') {
+          const paymentDetails = [];
+          
+          if (appmaxOrder.card_brand) {
+            paymentDetails.push(`Bandeira: ${appmaxOrder.card_brand}`);
+          }
+          
+          if (appmaxOrder.installments) {
+            const installmentValue = (parseFloat(appmaxOrder.total) / appmaxOrder.installments).toFixed(2);
+            paymentDetails.push(`${appmaxOrder.installments}x de R$ ${installmentValue}`);
+          }
+
+          if (paymentDetails.length > 0) {
+            noteAttributes.push({
+              name: 'payment_details',
+              value: paymentDetails.join(' | ')
+            });
+          }
+
+          // Adiciona atributos individuais para facilitar consultas
+          if (appmaxOrder.card_brand) {
+            noteAttributes.push({
+              name: 'card_brand',
+              value: appmaxOrder.card_brand
+            });
+          }
+          if (appmaxOrder.installments) {
+            noteAttributes.push({
+              name: 'installments',
+              value: appmaxOrder.installments.toString()
+            });
+          }
+        }
+
         // Adiciona informações de boleto se disponíveis
         if (appmaxOrder.payment_type === 'Boleto') {
           if (appmaxOrder.billet_url) {
@@ -472,7 +548,11 @@ class ShopifyService {
             id: orderId,
             financial_status: this.mapFinancialStatus(financialStatus),
             tags: [appmaxOrder.status, `appmax_status_${status}`],
-            note_attributes: noteAttributes
+            note_attributes: noteAttributes,
+            additional_details: appmaxOrder.payment_type === 'CreditCard' ? [
+              `Bandeira: ${appmaxOrder.card_brand || 'N/A'}`,
+              `Parcelas: ${appmaxOrder.installments || 1}x de R$ ${((parseFloat(appmaxOrder.total) || 0) / (appmaxOrder.installments || 1)).toFixed(2)}`
+            ] : []
           }
         };
 
