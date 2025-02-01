@@ -370,13 +370,15 @@ class ShopifyService {
           first_name: appmaxOrder.customer.firstname,
           last_name: appmaxOrder.customer.lastname,
           email: appmaxOrder.customer.email,
-          phone: formattedPhone
+          phone: formattedPhone,
+          company: appmaxOrder.customer.document_number || ''
         },
         shipping_address: {
           first_name: appmaxOrder.customer.firstname,
           last_name: appmaxOrder.customer.lastname,
-          address1: appmaxOrder.customer.address_street,
-          address2: appmaxOrder.customer.address_street_complement,
+          company: appmaxOrder.customer.document_number || '',
+          address1: `${appmaxOrder.customer.address_street}, ${appmaxOrder.customer.address_street_number}`,
+          address2: appmaxOrder.customer.address_street_complement || '',
           city: appmaxOrder.customer.address_city,
           province: appmaxOrder.customer.address_state,
           zip: appmaxOrder.customer.postcode,
@@ -386,8 +388,9 @@ class ShopifyService {
         billing_address: {
           first_name: appmaxOrder.customer.firstname,
           last_name: appmaxOrder.customer.lastname,
-          address1: appmaxOrder.customer.address_street,
-          address2: appmaxOrder.customer.address_street_complement,
+          company: appmaxOrder.customer.document_number || '',
+          address1: `${appmaxOrder.customer.address_street}, ${appmaxOrder.customer.address_street_number}`,
+          address2: appmaxOrder.customer.address_street_complement || '',
           city: appmaxOrder.customer.address_city,
           province: appmaxOrder.customer.address_state,
           zip: appmaxOrder.customer.postcode,
