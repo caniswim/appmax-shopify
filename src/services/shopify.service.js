@@ -290,6 +290,42 @@ class ShopifyService {
     const finalFinancialStatus = shopifyStatus.financial[financialStatus] || 'pending';
     const finalFulfillmentStatus = shopifyStatus.fulfillment[status] || null;
 
+    // Prepara os atributos de nota
+    const noteAttributes = [
+      {
+        name: 'appmax_id',
+        value: appmaxOrder.id.toString()
+      },
+      {
+        name: 'appmax_status',
+        value: appmaxOrder.status
+      },
+      {
+        name: 'appmax_payment_type',
+        value: appmaxOrder.payment_type || ''
+      },
+      {
+        name: 'appmax_url',
+        value: `https://admin.appmax.com.br/v2/sales/orders?order_by=id&sorted_by=desc&page=1&page_size=10&term=${appmaxOrder.id}`
+      }
+    ];
+
+    // Adiciona informações de boleto se disponíveis
+    if (appmaxOrder.payment_type === 'Boleto') {
+      if (appmaxOrder.billet_url) {
+        noteAttributes.push({
+          name: 'billet_url',
+          value: appmaxOrder.billet_url
+        });
+      }
+      if (appmaxOrder.billet_date_overdue) {
+        noteAttributes.push({
+          name: 'billet_date_overdue',
+          value: appmaxOrder.billet_date_overdue
+        });
+      }
+    }
+
     return {
       order: {
         line_items: lineItems,
@@ -326,7 +362,7 @@ class ShopifyService {
         financial_status: finalFinancialStatus,
         fulfillment_status: finalFulfillmentStatus,
         currency: 'BRL',
-        tags: [appmaxOrder.status, `appmax_status_${status}`], // Adiciona tags para rastreamento
+        tags: [appmaxOrder.status, `appmax_status_${status}`],
         total_price: appmaxOrder.total,
         subtotal_price: appmaxOrder.total_products,
         total_tax: '0.00',
@@ -337,20 +373,7 @@ class ShopifyService {
           title: appmaxOrder.freight_type || 'Frete Padrão'
         }],
         note: `Pedido Appmax #${appmaxOrder.id}`,
-        note_attributes: [
-          {
-            name: 'appmax_id',
-            value: appmaxOrder.id.toString()
-          },
-          {
-            name: 'appmax_status',
-            value: appmaxOrder.status
-          },
-          {
-            name: 'appmax_payment_type',
-            value: appmaxOrder.payment_type || ''
-          }
-        ]
+        note_attributes: noteAttributes
       }
     };
   }
@@ -408,25 +431,48 @@ class ShopifyService {
   async updateOrder(orderId, { appmaxOrder, status, financialStatus }) {
     return this.enqueueRequest(async () => {
       try {
+        // Prepara os atributos de nota para atualização
+        const noteAttributes = [
+          {
+            name: 'appmax_id',
+            value: appmaxOrder.id.toString()
+          },
+          {
+            name: 'appmax_status',
+            value: appmaxOrder.status
+          },
+          {
+            name: 'appmax_payment_type',
+            value: appmaxOrder.payment_type || ''
+          },
+          {
+            name: 'appmax_url',
+            value: `https://admin.appmax.com.br/v2/sales/orders?order_by=id&sorted_by=desc&page=1&page_size=10&term=${appmaxOrder.id}`
+          }
+        ];
+
+        // Adiciona informações de boleto se disponíveis
+        if (appmaxOrder.payment_type === 'Boleto') {
+          if (appmaxOrder.billet_url) {
+            noteAttributes.push({
+              name: 'billet_url',
+              value: appmaxOrder.billet_url
+            });
+          }
+          if (appmaxOrder.billet_date_overdue) {
+            noteAttributes.push({
+              name: 'billet_date_overdue',
+              value: appmaxOrder.billet_date_overdue
+            });
+          }
+        }
+
         const updateData = {
           order: {
             id: orderId,
             financial_status: this.mapFinancialStatus(financialStatus),
             tags: [appmaxOrder.status, `appmax_status_${status}`],
-            note_attributes: [
-              {
-                name: 'appmax_id',
-                value: appmaxOrder.id.toString()
-              },
-              {
-                name: 'appmax_status',
-                value: appmaxOrder.status
-              },
-              {
-                name: 'appmax_payment_type',
-                value: appmaxOrder.payment_type || ''
-              }
-            ]
+            note_attributes: noteAttributes
           }
         };
 
