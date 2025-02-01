@@ -4,54 +4,69 @@ const logger = require('../utils/logger');
 
 class Database {
   constructor() {
-    this.db = new sqlite3.Database(
-      path.join(__dirname, 'orders.db'),
-      (err) => {
-        if (err) {
-          logger.error('Erro ao conectar ao banco de dados:', err);
-        } else {
-          logger.info('Conectado ao banco de dados SQLite');
-          this.init();
+    this.initPromise = new Promise((resolve, reject) => {
+      this.db = new sqlite3.Database(
+        path.join(__dirname, 'orders.db'),
+        (err) => {
+          if (err) {
+            logger.error('Erro ao conectar ao banco de dados:', err);
+            reject(err);
+          } else {
+            logger.info('Conectado ao banco de dados SQLite');
+            this.init().then(resolve).catch(reject);
+          }
         }
-      }
-    );
+      );
+    });
   }
 
-  init() {
-    this.db.serialize(() => {
-      // Tabela de pedidos existente
-      this.db.run(`
-        CREATE TABLE IF NOT EXISTS orders (
-          appmax_id INTEGER PRIMARY KEY,
-          shopify_id TEXT NOT NULL,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
+  async init() {
+    return new Promise((resolve, reject) => {
+      this.db.serialize(() => {
+        try {
+          // Tabela de pedidos existente
+          this.db.run(`
+            CREATE TABLE IF NOT EXISTS orders (
+              appmax_id INTEGER PRIMARY KEY,
+              shopify_id TEXT NOT NULL,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+              updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+          `);
 
-      // Nova tabela para a fila
-      this.db.run(`
-        CREATE TABLE IF NOT EXISTS request_queue (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          appmax_id INTEGER NOT NULL,
-          event_type TEXT NOT NULL,
-          status TEXT NOT NULL,
-          financial_status TEXT NOT NULL,
-          request_data TEXT NOT NULL,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          processed_at DATETIME,
-          attempts INTEGER DEFAULT 0,
-          error TEXT,
-          FOREIGN KEY (appmax_id) REFERENCES orders(appmax_id)
-        )
-      `, (err) => {
-        if (err) {
-          logger.error('Erro ao criar tabela request_queue:', err);
-        } else {
-          logger.info('Tabelas criadas/verificadas com sucesso');
+          // Nova tabela para a fila
+          this.db.run(`
+            CREATE TABLE IF NOT EXISTS request_queue (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              appmax_id INTEGER NOT NULL,
+              event_type TEXT NOT NULL,
+              status TEXT NOT NULL,
+              financial_status TEXT NOT NULL,
+              request_data TEXT NOT NULL,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+              processed_at DATETIME,
+              attempts INTEGER DEFAULT 0,
+              error TEXT,
+              FOREIGN KEY (appmax_id) REFERENCES orders(appmax_id)
+            )
+          `, (err) => {
+            if (err) {
+              logger.error('Erro ao criar tabela request_queue:', err);
+              reject(err);
+            } else {
+              logger.info('Tabelas criadas/verificadas com sucesso');
+              resolve();
+            }
+          });
+        } catch (error) {
+          reject(error);
         }
       });
     });
+  }
+
+  async waitForInit() {
+    return this.initPromise;
   }
 
   async findShopifyOrderId(appmaxId) {

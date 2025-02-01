@@ -18,8 +18,8 @@ class ShopifyService {
     this.minRequestInterval = 500;
     this.orderLocks = new Map();
 
-    // Inicia o processamento da fila
-    this.startQueueProcessing();
+    // Inicia o processamento da fila após o banco estar pronto
+    this.init();
 
     // Adiciona interceptor para tratar erros
     this.client.interceptors.response.use(
@@ -73,14 +73,35 @@ class ShopifyService {
     );
   }
 
-  async startQueueProcessing() {
-    // Processa a fila a cada 5 segundos
-    setInterval(async () => {
-      await this.processQueue();
-    }, 5000);
+  async init() {
+    try {
+      // Aguarda a inicialização do banco
+      await db.waitForInit();
+      logger.info('Banco de dados inicializado, iniciando processamento da fila');
+      
+      // Inicia o processamento da fila
+      this.startQueueProcessing();
+    } catch (error) {
+      logger.error('Erro ao inicializar serviço:', error);
+    }
+  }
 
-    // Inicia o processamento imediatamente
-    await this.processQueue();
+  async startQueueProcessing() {
+    try {
+      // Processa a fila a cada 5 segundos
+      setInterval(async () => {
+        try {
+          await this.processQueue();
+        } catch (error) {
+          logger.error('Erro no processamento periódico da fila:', error);
+        }
+      }, 5000);
+
+      // Inicia o processamento imediatamente
+      await this.processQueue();
+    } catch (error) {
+      logger.error('Erro ao iniciar processamento da fila:', error);
+    }
   }
 
   async processQueue() {
@@ -131,39 +152,56 @@ class ShopifyService {
   }
 
   async enqueueRequest(requestFn) {
-    // Salva a requisição no banco
-    const requestId = await db.saveQueueRequest({
-      appmaxId: requestFn.appmaxOrder.id,
-      eventType: requestFn.event,
-      status: requestFn.status,
-      financialStatus: requestFn.financialStatus,
-      requestData: requestFn.appmaxOrder
-    });
+    try {
+      const { appmaxOrder, status, financialStatus } = requestFn;
+      
+      if (!appmaxOrder || !appmaxOrder.id) {
+        throw new AppError('Dados do pedido Appmax inválidos', 400);
+      }
 
-    logger.info(`Requisição #${requestId} adicionada à fila`);
+      // Salva a requisição no banco
+      const requestId = await db.saveQueueRequest({
+        appmaxId: appmaxOrder.id,
+        eventType: appmaxOrder.event || 'unknown',
+        status: status || 'pending',
+        financialStatus: financialStatus || 'pending',
+        requestData: appmaxOrder
+      });
 
-    // Inicia o processamento se não estiver em andamento
-    if (!this.processing) {
-      this.processQueue();
-    }
+      logger.info(`Requisição #${requestId} adicionada à fila para pedido Appmax #${appmaxOrder.id}`);
 
-    return new Promise((resolve, reject) => {
-      // Aguarda o processamento ser concluído
-      const checkStatus = async () => {
-        const request = await db.getRequestStatus(requestId);
-        if (request.processed_at) {
-          if (request.error) {
-            reject(new Error(request.error));
-          } else {
-            resolve();
+      // Inicia o processamento se não estiver em andamento
+      if (!this.processing) {
+        this.processQueue().catch(error => {
+          logger.error('Erro ao iniciar processamento da fila:', error);
+        });
+      }
+
+      return new Promise((resolve, reject) => {
+        // Aguarda o processamento ser concluído
+        const checkStatus = async () => {
+          try {
+            const request = await db.getRequestStatus(requestId);
+            if (request.processed_at) {
+              if (request.error) {
+                reject(new Error(request.error));
+              } else {
+                resolve();
+              }
+            } else {
+              setTimeout(checkStatus, 1000);
+            }
+          } catch (error) {
+            reject(error);
           }
-        } else {
-          setTimeout(checkStatus, 1000);
-        }
-      };
+        };
 
-      checkStatus();
-    });
+        checkStatus();
+      });
+    } catch (error) {
+      logger.error('Erro ao enfileirar requisição:', error);
+      throw error;
+    }
   }
 
   async lockOrder(orderId) {
