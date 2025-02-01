@@ -364,14 +364,14 @@ class ShopifyService {
         return { id: shopifyId };
       }
 
-      // Se não encontrar, busca na API da Shopify usando o endpoint de busca por nome/número
+      // Se não encontrar, busca na API da Shopify
       const { data } = await this.makeRequest(async () => {
-        return this.client.get('/orders/search.json', {
+        return this.client.get('/orders.json', {
           params: {
+            status: 'any',
+            created_at_min: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(), // últimos 30 dias
             fields: 'id,note_attributes,financial_status,fulfillment_status',
-            limit: 1,
-            // Busca pelo número do pedido da Appmax que está nas notas
-            query: `name:${appmaxId} OR note:"Pedido Appmax #${appmaxId}"`
+            limit: 250 // máximo permitido pela API
           }
         });
       });
@@ -386,7 +386,7 @@ class ShopifyService {
 
       // Se encontrou na Shopify, salva no banco local
       if (order) {
-        logger.info(`Pedido encontrado na Shopify via busca: Appmax #${appmaxId} -> Shopify #${order.id}`);
+        logger.info(`Pedido encontrado na Shopify: Appmax #${appmaxId} -> Shopify #${order.id}`);
         await db.saveOrderMapping(appmaxId, order.id);
       } else {
         logger.info(`Pedido não encontrado na Shopify: Appmax #${appmaxId}`);
@@ -394,6 +394,12 @@ class ShopifyService {
 
       return order;
     } catch (error) {
+      // Se for erro 404, significa que não encontrou o pedido
+      if (error.response?.status === 404) {
+        logger.info(`Pedido não encontrado na Shopify: Appmax #${appmaxId}`);
+        return null;
+      }
+
       logger.error('Erro ao buscar pedido na Shopify:', error);
       throw error;
     }
