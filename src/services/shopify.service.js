@@ -1,6 +1,7 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
 const AppError = require('../utils/AppError');
+const db = require('../database/db');
 
 class ShopifyService {
   constructor() {
@@ -177,19 +178,16 @@ class ShopifyService {
             return this.updateOrder(existingOrder.id, { appmaxOrder, status, financialStatus });
           }
 
-          // Verifica novamente antes de criar
-          const doubleCheck = await this.findOrderByAppmaxId(appmaxOrder.id);
-          if (doubleCheck) {
-            logger.info(`Pedido Appmax #${appmaxOrder.id} encontrado na segunda verificação: #${doubleCheck.id}`);
-            return this.updateOrder(doubleCheck.id, { appmaxOrder, status, financialStatus });
-          }
-
           const orderData = this.formatOrderData(appmaxOrder, status, financialStatus);
           logger.info('Criando pedido na Shopify:', orderData);
 
           try {
             const { data } = await this.makeRequest(() => this.client.post('/orders.json', orderData));
             logger.info(`Pedido Appmax #${appmaxOrder.id} criado com sucesso na Shopify: #${data.order.id}`);
+            
+            // Salva o mapeamento no banco local
+            await db.saveOrderMapping(appmaxOrder.id, data.order.id);
+            
             return data.order;
           } catch (error) {
             if (error.response?.status === 422 && error.response?.data?.errors?.['customer.email']) {
@@ -359,22 +357,42 @@ class ShopifyService {
 
   async findOrderByAppmaxId(appmaxId) {
     try {
+      // Primeiro tenta encontrar no banco local
+      const shopifyId = await db.findShopifyOrderId(appmaxId);
+      if (shopifyId) {
+        logger.info(`Pedido encontrado no banco local: Appmax #${appmaxId} -> Shopify #${shopifyId}`);
+        return { id: shopifyId };
+      }
+
+      // Se não encontrar, busca na API da Shopify usando o endpoint de busca por nome/número
       const { data } = await this.makeRequest(async () => {
-        return this.client.get('/orders.json', {
+        return this.client.get('/orders/search.json', {
           params: {
-            status: 'any',
             fields: 'id,note_attributes,financial_status,fulfillment_status',
             limit: 1,
-            query: `note_attribute:appmax_id:${appmaxId}`
+            // Busca pelo número do pedido da Appmax que está nas notas
+            query: `name:${appmaxId} OR note:"Pedido Appmax #${appmaxId}"`
           }
         });
       });
 
-      return data.orders.find(order => 
-        order.note_attributes.some(attr => 
+      // Verifica se o pedido encontrado realmente corresponde ao ID da Appmax
+      const order = data.orders.find(order => {
+        const appmaxAttr = order.note_attributes.find(attr => 
           attr.name === 'appmax_id' && attr.value === appmaxId.toString()
-        )
-      );
+        );
+        return !!appmaxAttr;
+      });
+
+      // Se encontrou na Shopify, salva no banco local
+      if (order) {
+        logger.info(`Pedido encontrado na Shopify via busca: Appmax #${appmaxId} -> Shopify #${order.id}`);
+        await db.saveOrderMapping(appmaxId, order.id);
+      } else {
+        logger.info(`Pedido não encontrado na Shopify: Appmax #${appmaxId}`);
+      }
+
+      return order;
     } catch (error) {
       logger.error('Erro ao buscar pedido na Shopify:', error);
       throw error;
