@@ -113,37 +113,31 @@ class ShopifyService {
     this.processing = true;
     logger.info(`Iniciando processamento da fila. Itens: ${this.requestQueue.length}`);
 
-    try {
-      while (this.requestQueue.length > 0) {
-        const request = this.requestQueue[0];
-        const waitTime = Date.now() - request.timestamp;
-        
-        logger.info(`Processando requisição da fila. Tempo de espera: ${waitTime}ms`);
+    while (this.requestQueue.length > 0) {
+      const request = this.requestQueue[0];
+      const waitTime = Date.now() - request.timestamp;
+      
+      logger.info(`Processando requisição da fila. Tempo de espera: ${waitTime}ms`);
 
-        try {
-          const result = await this.makeRequest(request.requestFn);
-          this.requestQueue.shift();
-          request.resolve(result);
-        } catch (error) {
-          if (error.response?.status === 429) {
-            logger.info('Rate limit atingido, aguardando antes de tentar novamente');
-            await new Promise(resolve => setTimeout(resolve, this.minRequestInterval * 2));
-            continue;
-          }
-          
-          this.requestQueue.shift();
-          request.reject(error);
+      try {
+        const result = await this.makeRequest(request.requestFn);
+        request.resolve(result);
+      } catch (error) {
+        if (error.response?.status === 429) {
+          logger.info('Rate limit atingido, aguardando antes de tentar novamente');
+          await new Promise(resolve => setTimeout(resolve, this.minRequestInterval * 2));
+          continue;
         }
-      }
-    } finally {
-      this.processing = false;
-      logger.info('Processamento da fila concluído');
-
-      // Se ainda houver itens na fila (adicionados durante o processamento)
-      if (this.requestQueue.length > 0) {
-        this.processQueue();
+        
+        request.reject(error);
+      } finally {
+        // Remove o item da fila após processamento, independente do resultado
+        this.requestQueue.shift();
       }
     }
+
+    this.processing = false;
+    logger.info('Processamento da fila concluído');
   }
 
   async lockOrder(orderId) {
@@ -475,98 +469,114 @@ class ShopifyService {
   async updateOrder(orderId, { appmaxOrder, status, financialStatus }) {
     return this.enqueueRequest(async () => {
       try {
-        // Prepara os atributos de nota para atualização
-        const noteAttributes = [
-          {
-            name: 'appmax_id',
-            value: appmaxOrder.id.toString()
-          },
-          {
-            name: 'appmax_status',
-            value: appmaxOrder.status
-          },
-          {
-            name: 'appmax_payment_type',
-            value: appmaxOrder.payment_type || ''
-          },
-          {
-            name: 'appmax_url',
-            value: `https://admin.appmax.com.br/v2/sales/orders?order_by=id&sorted_by=desc&page=1&page_size=10&term=${appmaxOrder.id}`
-          }
-        ];
+        logger.info(`Iniciando atualização do pedido Shopify #${orderId}. Status: ${status}, Financial Status: ${financialStatus}`);
 
-        // Adiciona informações de cartão de crédito se disponíveis
-        if (appmaxOrder.payment_type === 'CreditCard') {
-          const paymentDetails = [];
-          
-          if (appmaxOrder.card_brand) {
-            paymentDetails.push(`Bandeira: ${appmaxOrder.card_brand}`);
-          }
-          
-          if (appmaxOrder.installments) {
-            const installmentValue = (parseFloat(appmaxOrder.total) / appmaxOrder.installments).toFixed(2);
-            paymentDetails.push(`${appmaxOrder.installments}x de R$ ${installmentValue}`);
-          }
-
-          if (paymentDetails.length > 0) {
-            noteAttributes.push({
-              name: 'payment_details',
-              value: paymentDetails.join(' | ')
-            });
-          }
-
-          // Adiciona atributos individuais para facilitar consultas
-          if (appmaxOrder.card_brand) {
-            noteAttributes.push({
-              name: 'card_brand',
-              value: appmaxOrder.card_brand
-            });
-          }
-          if (appmaxOrder.installments) {
-            noteAttributes.push({
-              name: 'installments',
-              value: appmaxOrder.installments.toString()
-            });
-          }
-        }
-
-        // Adiciona informações de boleto se disponíveis
-        if (appmaxOrder.payment_type === 'Boleto') {
-          if (appmaxOrder.billet_url) {
-            noteAttributes.push({
-              name: 'billet_url',
-              value: appmaxOrder.billet_url
-            });
-          }
-          if (appmaxOrder.billet_date_overdue) {
-            noteAttributes.push({
-              name: 'billet_date_overdue',
-              value: appmaxOrder.billet_date_overdue
-            });
-          }
-        }
-
+        // Mapeia os status
+        const mappedFinancialStatus = this.mapFinancialStatus(financialStatus);
+        
+        // Prepara os dados de atualização
         const updateData = {
           order: {
             id: orderId,
-            financial_status: this.mapFinancialStatus(financialStatus),
-            tags: [appmaxOrder.status, `appmax_status_${status}`],
-            note_attributes: noteAttributes,
-            additional_details: appmaxOrder.payment_type === 'CreditCard' ? [
-              `Bandeira: ${appmaxOrder.card_brand || 'N/A'}`,
-              `Parcelas: ${appmaxOrder.installments || 1}x de R$ ${((parseFloat(appmaxOrder.total) || 0) / (appmaxOrder.installments || 1)).toFixed(2)}`
-            ] : []
+            financial_status: mappedFinancialStatus,
+            tags: [appmaxOrder.status, `appmax_status_${status}`].filter(Boolean),
+            note_attributes: this.formatNoteAttributes(appmaxOrder),
+            additional_details: this.formatAdditionalDetails(appmaxOrder)
           }
         };
 
-        logger.info(`Atualizando pedido Shopify #${orderId} para status ${status}`);
-        const { data } = await this.client.put(`/orders/${orderId}.json`, updateData);
+        logger.info(`Atualizando pedido Shopify #${orderId}:`, updateData);
+        
+        const { data } = await this.makeRequest(() => 
+          this.client.put(`/orders/${orderId}.json`, updateData)
+        );
+
+        logger.info(`Pedido Shopify #${orderId} atualizado com sucesso. Novo status: ${data.order.financial_status}`);
         return data.order;
       } catch (error) {
-        logger.error('Erro ao atualizar pedido na Shopify:', error);
-        throw error;
+        logger.error(`Erro ao atualizar pedido Shopify #${orderId}:`, error);
+        throw new AppError(
+          `Erro ao atualizar pedido na Shopify: ${error.message}`,
+          error.response?.status || 500
+        );
       }
     });
+  }
+
+  formatNoteAttributes(appmaxOrder) {
+    const noteAttributes = [
+      {
+        name: 'appmax_id',
+        value: appmaxOrder.id.toString()
+      },
+      {
+        name: 'appmax_status',
+        value: appmaxOrder.status
+      },
+      {
+        name: 'appmax_payment_type',
+        value: appmaxOrder.payment_type || ''
+      },
+      {
+        name: 'appmax_url',
+        value: `https://admin.appmax.com.br/v2/sales/orders?order_by=id&sorted_by=desc&page=1&page_size=10&term=${appmaxOrder.id}`
+      }
+    ];
+
+    if (appmaxOrder.payment_type === 'CreditCard' && (appmaxOrder.card_brand || appmaxOrder.installments)) {
+      const paymentDetails = [];
+      
+      if (appmaxOrder.card_brand) {
+        paymentDetails.push(`Bandeira: ${appmaxOrder.card_brand}`);
+        noteAttributes.push({
+          name: 'card_brand',
+          value: appmaxOrder.card_brand
+        });
+      }
+      
+      if (appmaxOrder.installments) {
+        const installmentValue = (parseFloat(appmaxOrder.total) / appmaxOrder.installments).toFixed(2);
+        paymentDetails.push(`${appmaxOrder.installments}x de R$ ${installmentValue}`);
+        noteAttributes.push({
+          name: 'installments',
+          value: appmaxOrder.installments.toString()
+        });
+      }
+
+      if (paymentDetails.length > 0) {
+        noteAttributes.push({
+          name: 'payment_details',
+          value: paymentDetails.join(' | ')
+        });
+      }
+    }
+
+    if (appmaxOrder.payment_type === 'Boleto') {
+      if (appmaxOrder.billet_url) {
+        noteAttributes.push({
+          name: 'billet_url',
+          value: appmaxOrder.billet_url
+        });
+      }
+      if (appmaxOrder.billet_date_overdue) {
+        noteAttributes.push({
+          name: 'billet_date_overdue',
+          value: appmaxOrder.billet_date_overdue
+        });
+      }
+    }
+
+    return noteAttributes;
+  }
+
+  formatAdditionalDetails(appmaxOrder) {
+    if (appmaxOrder.payment_type === 'CreditCard') {
+      return [
+        `Bandeira: ${appmaxOrder.card_brand || 'N/A'}`,
+        `Parcelas: ${appmaxOrder.installments || 1}x de R$ ${((parseFloat(appmaxOrder.total) || 0) / (appmaxOrder.installments || 1)).toFixed(2)}`
+      ];
+    }
+    return [];
   }
 
   isRetryableError(error) {
