@@ -13,12 +13,13 @@ class ShopifyService {
       }
     });
 
-    // Controle de rate limit
-    this.requestQueue = [];
     this.processing = false;
     this.lastRequestTime = 0;
-    this.minRequestInterval = 500; // 500ms entre requisições (2 por segundo)
-    this.orderLocks = new Map(); // Controle de locks por pedido
+    this.minRequestInterval = 500;
+    this.orderLocks = new Map();
+
+    // Inicia o processamento da fila
+    this.startQueueProcessing();
 
     // Adiciona interceptor para tratar erros
     this.client.interceptors.response.use(
@@ -72,72 +73,97 @@ class ShopifyService {
     );
   }
 
-  async makeRequest(requestFn) {
-    const now = Date.now();
-    const timeSinceLastRequest = now - this.lastRequestTime;
-    
-    if (timeSinceLastRequest < this.minRequestInterval) {
-      const waitTime = this.minRequestInterval - timeSinceLastRequest;
-      logger.info(`Aguardando ${waitTime}ms antes da próxima requisição`);
-      await new Promise(resolve => setTimeout(resolve, waitTime));
-    }
+  async startQueueProcessing() {
+    // Processa a fila a cada 5 segundos
+    setInterval(async () => {
+      await this.processQueue();
+    }, 5000);
 
-    this.lastRequestTime = Date.now();
-    return requestFn();
-  }
-
-  async enqueueRequest(requestFn) {
-    logger.info(`Adicionando requisição à fila. Tamanho atual: ${this.requestQueue.length}`);
-    const promise = new Promise((resolve, reject) => {
-      this.requestQueue.push({ 
-        requestFn, 
-        resolve, 
-        reject,
-        timestamp: Date.now()
-      });
-    });
-
-    // Se não estiver processando, inicia o processamento
-    if (!this.processing) {
-      this.processQueue();
-    }
-
-    return promise;
+    // Inicia o processamento imediatamente
+    await this.processQueue();
   }
 
   async processQueue() {
-    if (this.processing || this.requestQueue.length === 0) {
+    if (this.processing) {
       return;
     }
 
     this.processing = true;
-    logger.info(`Iniciando processamento da fila. Itens: ${this.requestQueue.length}`);
+    logger.info('Iniciando processamento da fila');
 
-    while (this.requestQueue.length > 0) {
-      const request = this.requestQueue[0];
-      const waitTime = Date.now() - request.timestamp;
-      
-      logger.info(`Processando requisição da fila. Tempo de espera: ${waitTime}ms`);
+    try {
+      const requests = await db.getUnprocessedRequests();
+      logger.info(`Encontradas ${requests.length} requisições para processar`);
 
-      try {
-        const result = await this.makeRequest(request.requestFn);
-        request.resolve(result);
-      } catch (error) {
-        if (error.response?.status === 429) {
-          logger.info('Rate limit atingido, aguardando antes de tentar novamente');
-          await new Promise(resolve => setTimeout(resolve, this.minRequestInterval * 2));
-          continue;
+      for (const request of requests) {
+        try {
+          logger.info(`Processando requisição #${request.id} para pedido Appmax #${request.appmax_id}`);
+          
+          const result = await this.createOrUpdateOrder({
+            appmaxOrder: request.request_data,
+            status: request.status,
+            financialStatus: request.financial_status
+          });
+
+          await db.markRequestAsProcessed(request.id);
+          logger.info(`Requisição #${request.id} processada com sucesso`);
+        } catch (error) {
+          const errorMessage = error.message || 'Erro desconhecido';
+          logger.error(`Erro ao processar requisição #${request.id}:`, error);
+          await db.markRequestAsProcessed(request.id, errorMessage);
+
+          // Se for um erro de rate limit, pausa o processamento
+          if (error.response?.status === 429) {
+            logger.info('Rate limit atingido, pausando processamento');
+            await new Promise(resolve => setTimeout(resolve, this.minRequestInterval * 2));
+          }
         }
-        
-        request.reject(error);
-      } finally {
-        // Remove o item da fila após processamento, independente do resultado
-        this.requestQueue.shift();
+
+        // Aguarda o intervalo mínimo entre requisições
+        await new Promise(resolve => setTimeout(resolve, this.minRequestInterval));
       }
+    } catch (error) {
+      logger.error('Erro ao processar fila:', error);
+    } finally {
+      this.processing = false;
+      logger.info('Processamento da fila concluído');
+    }
+  }
+
+  async enqueueRequest(requestFn) {
+    // Salva a requisição no banco
+    const requestId = await db.saveQueueRequest({
+      appmaxId: requestFn.appmaxOrder.id,
+      eventType: requestFn.event,
+      status: requestFn.status,
+      financialStatus: requestFn.financialStatus,
+      requestData: requestFn.appmaxOrder
+    });
+
+    logger.info(`Requisição #${requestId} adicionada à fila`);
+
+    // Inicia o processamento se não estiver em andamento
+    if (!this.processing) {
+      this.processQueue();
     }
 
-    this.processing = false;
-    logger.info('Processamento da fila concluído');
+    return new Promise((resolve, reject) => {
+      // Aguarda o processamento ser concluído
+      const checkStatus = async () => {
+        const request = await db.getRequestStatus(requestId);
+        if (request.processed_at) {
+          if (request.error) {
+            reject(new Error(request.error));
+          } else {
+            resolve();
+          }
+        } else {
+          setTimeout(checkStatus, 1000);
+        }
+      };
+
+      checkStatus();
+    });
   }
 
   async lockOrder(orderId) {
