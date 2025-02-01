@@ -110,44 +110,49 @@ class ShopifyService {
     }
 
     this.processing = true;
-    logger.info('Iniciando processamento da fila');
+    let hasRequests = false;
 
     try {
       const requests = await db.getUnprocessedRequests();
-      logger.info(`Encontradas ${requests.length} requisições para processar`);
+      
+      if (requests.length > 0) {
+        hasRequests = true;
+        logger.info(`Iniciando processamento da fila. Encontradas ${requests.length} requisições para processar`);
 
-      for (const request of requests) {
-        try {
-          logger.info(`Processando requisição #${request.id} para pedido Appmax #${request.appmax_id}`);
-          
-          const result = await this.createOrUpdateOrder({
-            appmaxOrder: request.request_data,
-            status: request.status,
-            financialStatus: request.financial_status
-          });
+        for (const request of requests) {
+          try {
+            logger.info(`Processando requisição #${request.id} para pedido Appmax #${request.appmax_id}`);
+            
+            const result = await this.createOrUpdateOrder({
+              appmaxOrder: request.request_data,
+              status: request.status,
+              financialStatus: request.financial_status
+            });
 
-          await db.markRequestAsProcessed(request.id);
-          logger.info(`Requisição #${request.id} processada com sucesso`);
-        } catch (error) {
-          const errorMessage = error.message || 'Erro desconhecido';
-          logger.error(`Erro ao processar requisição #${request.id}:`, error);
-          await db.markRequestAsProcessed(request.id, errorMessage);
+            await db.markRequestAsProcessed(request.id);
+            logger.info(`Requisição #${request.id} processada com sucesso`);
+          } catch (error) {
+            const errorMessage = error.message || 'Erro desconhecido';
+            logger.error(`Erro ao processar requisição #${request.id}:`, error);
+            await db.markRequestAsProcessed(request.id, errorMessage);
 
-          // Se for um erro de rate limit, pausa o processamento
-          if (error.response?.status === 429) {
-            logger.info('Rate limit atingido, pausando processamento');
-            await new Promise(resolve => setTimeout(resolve, this.minRequestInterval * 2));
+            // Se for um erro de rate limit, pausa o processamento
+            if (error.response?.status === 429) {
+              logger.info('Rate limit atingido, pausando processamento');
+              await new Promise(resolve => setTimeout(resolve, this.minRequestInterval * 2));
+            }
           }
+
+          // Aguarda o intervalo mínimo entre requisições
+          await new Promise(resolve => setTimeout(resolve, this.minRequestInterval));
         }
 
-        // Aguarda o intervalo mínimo entre requisições
-        await new Promise(resolve => setTimeout(resolve, this.minRequestInterval));
+        logger.info('Processamento da fila concluído');
       }
     } catch (error) {
       logger.error('Erro ao processar fila:', error);
     } finally {
       this.processing = false;
-      logger.info('Processamento da fila concluído');
     }
   }
 
