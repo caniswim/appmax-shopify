@@ -34,16 +34,20 @@ class WebhookController {
         customer: `${firstName} ${lastName}`.trim()
       });
 
-      // Para eventos de pedidos (eventos que começam com "Order"), se os dados não estiverem completos,
-      // busca os dados completos via API da Appmax. Assim evitamos chamar a API desnecessariamente,
-      // o que estava ocasionando o erro de autorização.
+      // Para eventos de pedidos, sempre tenta buscar os dados completos da Appmax.
+      // Se não for possível (por exemplo, por erro de autorização ou timeout), utiliza os dados parciais.
       let appmaxOrder = orderData;
-      if (event.startsWith('Order') && !this.hasFullOrderDetails(orderData)) {
+      if (event.startsWith('Order')) {
         try {
-          appmaxOrder = await appmaxService.getOrderById(orderData.id);
+          const fullData = await appmaxService.getOrderById(orderData.id);
+          if (fullData) {
+            appmaxOrder = fullData;
+          } else {
+            logger.warn(`Dados completos não encontrados para o pedido #${orderData.id}, utilizando dados parciais.`);
+          }
         } catch (error) {
-          logger.error(`Erro ao buscar dados completos do pedido #${orderData.id}:`, error);
-          throw error;
+          logger.warn(`Não foi possível obter dados completos para o pedido #${orderData.id}, utilizando dados parciais. Erro:`, error.message);
+          // Fallback para os dados parciais (orderData)
         }
       }
 
@@ -52,72 +56,55 @@ class WebhookController {
         case 'OrderApproved':
           await this.handleOrderApproved(appmaxOrder);
           break;
-          
         case 'OrderPaid':
           await this.handleOrderPaid(appmaxOrder);
           break;
-          
         case 'OrderRefund':
           await this.handleOrderRefund(appmaxOrder);
           break;
-          
         case 'PaymentNotAuthorized':
           await this.handlePaymentNotAuthorized(appmaxOrder);
           break;
-          
         case 'OrderAuthorized':
           await this.handleOrderAuthorized(appmaxOrder);
           break;
-
         case 'PendingIntegration':
           logger.info(`Pedido ${appmaxOrder.id} pendente de integração`, appmaxOrder);
           break;
-
         case 'PixGenerated':
           await this.handlePixGenerated(appmaxOrder);
           break;
-
         case 'PixExpired':
           await this.handlePixExpired(appmaxOrder);
           break;
-
         case 'OrderIntegrated':
           await this.handleOrderIntegrated(appmaxOrder);
           break;
-
         case 'BoletoExpired':
           await this.handleBoletoExpired(appmaxOrder);
           break;
-
         case 'ChargebackDispute':
           await this.handleChargebackDispute(appmaxOrder);
           break;
-
         case 'ChargebackWon':
           await this.handleChargebackWon(appmaxOrder);
           break;
-
         case 'OrderBilletCreated':
           await this.handleOrderBilletCreated(appmaxOrder);
           break;
-
         case 'OrderPixCreated':
           await this.handleOrderPixCreated(appmaxOrder);
           break;
-
         case 'OrderPaidByPix':
           await this.handleOrderPaid(appmaxOrder);
           break;
-
         default:
           logger.info(`Evento não tratado: ${event}`);
       }
 
       res.status(200).json({ success: true });
     } catch (error) {
-      if (error instanceof AppError) {
-        return next(error);
-      }
+      if (error instanceof AppError) return next(error);
       next(new AppError('Erro interno ao processar webhook', 500));
     }
   }

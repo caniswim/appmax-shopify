@@ -303,7 +303,6 @@ class ShopifyService {
             logger.info(`Pedido não encontrado na Shopify com o ID mapeado: Appmax #${appmaxId}`);
             // Opcional: remover o mapeamento desatualizado do DB
             // await db.deleteOrderMapping(appmaxId);
-            // Continua para buscar pelo listagem, ou retorna null para forçar a criação.
             return null;
           }
           throw error;
@@ -351,7 +350,6 @@ class ShopifyService {
     }
   }
   
-
   /**
    * Atualiza um pedido existente na Shopify com os dados da Appmax.
    */
@@ -364,8 +362,8 @@ class ShopifyService {
           id: orderId,
           financial_status: mappedFinancialStatus,
           tags: [appmaxOrder.status, `appmax_status_${status}`].filter(Boolean),
-          note_attributes: this.formatNoteAttributes(appmaxOrder),
-          additional_details: this.formatAdditionalDetails(appmaxOrder)
+          note_attributes: this.formatNoteAttributes(appmaxOrder)
+          // Removido o campo additional_details, pois não é suportado pela API da Shopify
         }
       };
       logger.info(`Atualizando pedido Shopify #${orderId}:`, updateData);
@@ -398,6 +396,10 @@ class ShopifyService {
     return null;
   }
 
+  /**
+   * Formata os dados do pedido para envio à Shopify.
+   * Foi removido o campo additional_details, pois não faz parte da especificação.
+   */
   formatOrderData(appmaxOrder, status, financialStatus) {
     const lineItems = [];
     const formattedPhone = this.formatPhoneNumber(appmaxOrder.customer.telephone);
@@ -557,11 +559,7 @@ class ShopifyService {
           title: appmaxOrder.freight_type || 'Frete Padrão'
         }],
         note: `Pedido Appmax #${appmaxOrder.id}`,
-        note_attributes: noteAttributes,
-        additional_details: appmaxOrder.payment_type === 'CreditCard' ? [
-          `Bandeira: ${appmaxOrder.card_brand || 'N/A'}`,
-          `Parcelas: ${appmaxOrder.installments || 1}x de R$ ${((parseFloat(appmaxOrder.total) || 0) / (appmaxOrder.installments || 1)).toFixed(2)}`
-        ] : []
+        note_attributes: noteAttributes
       }
     };
 
@@ -628,16 +626,6 @@ class ShopifyService {
       }
     }
     return noteAttributes;
-  }
-
-  formatAdditionalDetails(appmaxOrder) {
-    if (appmaxOrder.payment_type === 'CreditCard') {
-      return [
-        `Bandeira: ${appmaxOrder.card_brand || 'N/A'}`,
-        `Parcelas: ${appmaxOrder.installments || 1}x de R$ ${((parseFloat(appmaxOrder.total) || 0) / (appmaxOrder.installments || 1)).toFixed(2)}`
-      ];
-    }
-    return [];
   }
 
   isRetryableError(error) {
