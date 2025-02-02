@@ -1,4 +1,5 @@
 const shopifyService = require('../services/shopify.service');
+const appmaxService = require('../services/appmax.service');
 const logger = require('../utils/logger');
 const AppError = require('../utils/AppError');
 
@@ -18,65 +19,76 @@ class WebhookController {
         customer: `${data.customer?.firstname} ${data.customer?.lastname}`
       });
 
+      // Busca os dados completos do pedido se for um evento relacionado a pedido
+      let appmaxOrder = data;
+      if (data.id && event.startsWith('Order')) {
+        try {
+          appmaxOrder = await appmaxService.getOrderById(data.id);
+        } catch (error) {
+          logger.error(`Erro ao buscar dados completos do pedido #${data.id}:`, error);
+          throw error;
+        }
+      }
+
       switch (event) {
         case 'OrderApproved':
-          await this.handleOrderApproved(data);
+          await this.handleOrderApproved(appmaxOrder);
           break;
           
         case 'OrderPaid':
-          await this.handleOrderPaid(data);
+          await this.handleOrderPaid(appmaxOrder);
           break;
           
         case 'OrderRefund':
-          await this.handleOrderRefund(data);
+          await this.handleOrderRefund(appmaxOrder);
           break;
           
         case 'PaymentNotAuthorized':
-          await this.handlePaymentNotAuthorized(data);
+          await this.handlePaymentNotAuthorized(appmaxOrder);
           break;
           
         case 'OrderAuthorized':
-          await this.handleOrderAuthorized(data);
+          await this.handleOrderAuthorized(appmaxOrder);
           break;
 
         case 'PendingIntegration':
-          logger.info(`Pedido ${data.id} pendente de integração`, data);
+          logger.info(`Pedido ${appmaxOrder.id} pendente de integração`, appmaxOrder);
           break;
 
         case 'PixGenerated':
-          await this.handlePixGenerated(data);
+          await this.handlePixGenerated(appmaxOrder);
           break;
 
         case 'PixExpired':
-          await this.handlePixExpired(data);
+          await this.handlePixExpired(appmaxOrder);
           break;
 
         case 'OrderIntegrated':
-          await this.handleOrderIntegrated(data);
+          await this.handleOrderIntegrated(appmaxOrder);
           break;
 
         case 'BoletoExpired':
-          await this.handleBoletoExpired(data);
+          await this.handleBoletoExpired(appmaxOrder);
           break;
 
         case 'ChargebackDispute':
-          await this.handleChargebackDispute(data);
+          await this.handleChargebackDispute(appmaxOrder);
           break;
 
         case 'ChargebackWon':
-          await this.handleChargebackWon(data);
+          await this.handleChargebackWon(appmaxOrder);
           break;
 
         case 'OrderBilletCreated':
-          await this.handleOrderBilletCreated(data);
+          await this.handleOrderBilletCreated(appmaxOrder);
           break;
 
         case 'OrderPixCreated':
-          await this.handleOrderPixCreated(data);
+          await this.handleOrderPixCreated(appmaxOrder);
           break;
 
         case 'OrderPaidByPix':
-          await this.handleOrderPaid(data);
+          await this.handleOrderPaid(appmaxOrder);
           break;
           
         default:
