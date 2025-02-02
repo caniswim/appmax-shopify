@@ -34,20 +34,22 @@ class WebhookController {
         customer: `${firstName} ${lastName}`.trim()
       });
 
-      // Para eventos de pedidos, sempre tenta buscar os dados completos da Appmax.
-      // Se não for possível (por exemplo, por erro de autorização ou timeout), utiliza os dados parciais.
+      // Para eventos de pedidos, tenta buscar os dados completos via API da Appmax.
+      // Se a chamada falhar (por exemplo, retornar 403), registra o erro e utiliza os dados parciais.
       let appmaxOrder = orderData;
       if (event.startsWith('Order')) {
+        logger.info(`Buscando dados completos do pedido Appmax #${orderData.id}`);
         try {
-          const fullData = await appmaxService.getOrderById(orderData.id);
-          if (fullData) {
-            appmaxOrder = fullData;
-          } else {
-            logger.warn(`Dados completos não encontrados para o pedido #${orderData.id}, utilizando dados parciais.`);
-          }
+          appmaxOrder = await appmaxService.getOrderById(orderData.id);
         } catch (error) {
-          logger.warn(`Não foi possível obter dados completos para o pedido #${orderData.id}, utilizando dados parciais. Erro:`, error.message);
-          // Fallback para os dados parciais (orderData)
+          logger.error(`Erro ao buscar pedido #${orderData.id} na Appmax:`, error);
+          if (error.response && error.response.status === 403) {
+            logger.warn(`Erro 403 na busca de dados completos. Utilizando dados parciais para o pedido #${orderData.id}`);
+            // Continua utilizando os dados parciais
+            appmaxOrder = orderData;
+          } else {
+            throw error;
+          }
         }
       }
 
@@ -104,7 +106,9 @@ class WebhookController {
 
       res.status(200).json({ success: true });
     } catch (error) {
-      if (error instanceof AppError) return next(error);
+      if (error instanceof AppError) {
+        return next(error);
+      }
       next(new AppError('Erro interno ao processar webhook', 500));
     }
   }
