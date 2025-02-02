@@ -284,29 +284,51 @@ class ShopifyService {
    */
   async findOrderByAppmaxId(appmaxId) {
     try {
+      // Tenta primeiro buscar o mapeamento no banco local
       const shopifyId = await db.findShopifyOrderId(appmaxId);
       if (shopifyId) {
         logger.info(`Pedido encontrado no banco local: Appmax #${appmaxId} -> Shopify #${shopifyId}`);
-        // Obtém detalhes completos do pedido na Shopify
-        const { data } = await this.makeRequest(() => this.client.get(`/orders/${shopifyId}.json`));
-        return data.order;
+        try {
+          const { data } = await this.makeRequest(() =>
+            this.client.get(`/orders/${shopifyId}.json`)
+          );
+          return data.order;
+        } catch (error) {
+          // Se o GET com o shopifyId retornar 404, significa que o pedido não existe mais na Shopify.
+          if (
+            (error.response && error.response.status === 404) ||
+            (error.statusCode && error.statusCode === 404) ||
+            (error.message && error.message.includes('Not Found'))
+          ) {
+            logger.info(`Pedido não encontrado na Shopify com o ID mapeado: Appmax #${appmaxId}`);
+            // Opcional: remover o mapeamento desatualizado do DB
+            // await db.deleteOrderMapping(appmaxId);
+            // Continua para buscar pelo listagem, ou retorna null para forçar a criação.
+            return null;
+          }
+          throw error;
+        }
       }
+  
+      // Se não há mapeamento, tenta buscar o pedido na Shopify por meio da listagem
       const { data } = await this.makeRequest(() => {
         return this.client.get('/orders.json', {
           params: {
             status: 'any',
-            created_at_min: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+            created_at_min: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(), // últimos 30 dias
             fields: 'id,note_attributes,financial_status,fulfillment_status,currency,total_price',
             limit: 250
           }
         });
       });
+  
       const order = data.orders.find(order => {
         const appmaxAttr = order.note_attributes.find(attr =>
           attr.name === 'appmax_id' && attr.value === appmaxId.toString()
         );
         return !!appmaxAttr;
       });
+  
       if (order) {
         logger.info(`Pedido encontrado na Shopify: Appmax #${appmaxId} -> Shopify #${order.id}`);
         await db.saveOrderMapping(appmaxId, order.id);
@@ -315,7 +337,12 @@ class ShopifyService {
       }
       return order;
     } catch (error) {
-      if (error.response?.status === 404) {
+      // Se o erro indicar "Not Found", trata-o retornando null
+      if (
+        (error.response && error.response.status === 404) ||
+        (error.statusCode && error.statusCode === 404) ||
+        (error.message && error.message.includes('Not Found'))
+      ) {
         logger.info(`Pedido não encontrado na Shopify: Appmax #${appmaxId}`);
         return null;
       }
@@ -323,6 +350,7 @@ class ShopifyService {
       throw error;
     }
   }
+  
 
   /**
    * Atualiza um pedido existente na Shopify com os dados da Appmax.
