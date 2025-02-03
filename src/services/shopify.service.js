@@ -386,9 +386,12 @@ async findOrderByAppmaxId(appmaxId) {
         this.client.put(`/orders/${orderId}.json`, updateData)
       );
 
-      // Se o status financeiro for 'paid', marca o pedido como pago via GraphQL
-      if (financialStatus === 'paid') {
-        logger.info(`Marcando pedido #${orderId} como pago`);
+      // Atualiza o status do pedido via GraphQL de acordo com o status solicitado
+      if (status === 'cancelled' || financialStatus === 'cancelled') {
+        await this.cancelOrder(orderId);
+      } else if (financialStatus === 'refunded') {
+        await this.refundOrder(orderId);
+      } else if (financialStatus === 'paid') {
         await this.markOrderAsPaid(orderId);
       }
 
@@ -767,20 +770,6 @@ async findOrderByAppmaxId(appmaxId) {
     return statusMap[status] || 'pending';
   }
 
-  async cancelOrder(orderId) {
-    try {
-      logger.info(`Cancelando pedido Shopify #${orderId}`);
-      const { data } = await this.makeRequest(() =>
-        this.client.post(`/orders/${orderId}/cancel.json`)
-      );
-      logger.info(`Pedido Shopify #${orderId} cancelado com sucesso`);
-      return data.order;
-    } catch (error) {
-      logger.error(`Erro ao cancelar pedido Shopify #${orderId}:`, error);
-      throw new AppError(`Erro ao cancelar pedido na Shopify: ${error.message}`, error.response?.status || 500);
-    }
-  }
-
   /**
    * Executa uma query/mutation GraphQL na API da Shopify
    */
@@ -837,6 +826,93 @@ async findOrderByAppmaxId(appmaxId) {
     }
 
     return result.orderMarkAsPaid.order;
+  }
+
+  /**
+   * Cancela um pedido usando a mutation orderCancel
+   */
+  async cancelOrder(orderId) {
+    const mutation = `
+      mutation orderCancel($input: OrderCancelInput!) {
+        orderCancel(input: $input) {
+          order {
+            id
+            displayFinancialStatus
+            cancelledAt
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const variables = {
+      input: {
+        id: `gid://shopify/Order/${orderId}`
+      }
+    };
+
+    logger.info(`Cancelando pedido #${orderId} via GraphQL`);
+    const result = await this.graphql(mutation, variables);
+
+    if (result.orderCancel.userErrors?.length > 0) {
+      const errors = result.orderCancel.userErrors.map(e => e.message).join('; ');
+      throw new AppError(`Erro ao cancelar pedido: ${errors}`, 400);
+    }
+
+    return result.orderCancel.order;
+  }
+
+  /**
+   * Reembolsa um pedido usando a mutation refundCreate
+   */
+  async refundOrder(orderId) {
+    // Primeiro, busca os detalhes do pedido para calcular o reembolso
+    const { data: orderData } = await this.makeRequest(() =>
+      this.client.get(`/orders/${orderId}.json`)
+    );
+
+    const mutation = `
+      mutation refundCreate($input: RefundInput!) {
+        refundCreate(input: $input) {
+          refund {
+            id
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const variables = {
+      input: {
+        orderId: `gid://shopify/Order/${orderId}`,
+        notify: true,
+        note: "Reembolso automático via Appmax",
+        shipping: {
+          fullRefund: true
+        },
+        refundLineItems: orderData.order.line_items.map(item => ({
+          lineItemId: `gid://shopify/LineItem/${item.id}`,
+          quantity: item.quantity,
+          restockType: "NO_RESTOCK"
+        }))
+      }
+    };
+
+    logger.info(`Reembolsando pedido #${orderId} via GraphQL`);
+    const result = await this.graphql(mutation, variables);
+
+    if (result.refundCreate.userErrors?.length > 0) {
+      const errors = result.refundCreate.userErrors.map(e => e.message).join('; ');
+      throw new AppError(`Erro ao reembolsar pedido: ${errors}`, 400);
+    }
+
+    return result.refundCreate.refund;
   }
 
   formatTags(appmaxOrder, status) {
