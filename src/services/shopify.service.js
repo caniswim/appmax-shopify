@@ -191,9 +191,10 @@ class ShopifyService {
    */
   async processOrder({ appmaxOrder, status, financialStatus }) {
     try {
-      if (!appmaxOrder || !appmaxOrder.bundles) {
+      if (!appmaxOrder) {
         throw new AppError('Dados do pedido Appmax inválidos', 400);
       }
+      
       // Adquire lock do pedido com timeout para evitar deadlock
       await this.lockOrder(appmaxOrder.id);
       logger.info(`Lock adquirido para pedido Appmax #${appmaxOrder.id}`);

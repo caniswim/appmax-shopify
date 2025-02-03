@@ -2,29 +2,25 @@ const shopifyService = require('../services/shopify.service');
 const appmaxService = require('../services/appmax.service');
 const logger = require('../utils/logger');
 const AppError = require('../utils/AppError');
+const fs = require('fs');
+const enableWebhookLogging = process.argv.includes('--webhook');
 
 class WebhookController {
-  /**
-   * Verifica se os dados do pedido estão completos.
-   * Aqui, por exemplo, consideramos que o pedido é completo se possuir o array "bundles"
-   * (que contém os produtos) e informações do cliente.
-   */
-  hasFullOrderDetails(order) {
-    return order && Array.isArray(order.bundles) && order.customer;
-  }
-
   async handleAppmax(req, res, next) {
     try {
-      // Extrai o evento e os dados do webhook
+      if (enableWebhookLogging) {
+        const logEntry = new Date().toISOString() + ' ' + JSON.stringify(req.body) + "\n";
+        fs.appendFile('webhooks.log', logEntry, (err) => {
+          if (err) logger.error('Erro ao salvar webhook no arquivo:', err);
+        });
+      }
       const { event, data } = req.body;
       if (!event || !data) {
         throw new AppError('Dados do webhook inválidos', 400);
       }
 
-      // Caso os dados do pedido estejam aninhados em "order", utiliza-os; caso contrário, usa o objeto data
       const orderData = data.order || data;
 
-      // Extrai os nomes do cliente, considerando variações na nomenclatura (camelCase ou minúsculo)
       const firstName = orderData.customer?.firstName || orderData.customer?.firstname || 'N/A';
       const lastName = orderData.customer?.lastName || orderData.customer?.lastname || '';
       logger.info('Webhook recebido:', {
@@ -34,26 +30,8 @@ class WebhookController {
         customer: `${firstName} ${lastName}`.trim()
       });
 
-      // Para eventos de pedidos, tenta buscar os dados completos via API da Appmax.
-      // Se a chamada falhar (por exemplo, retornar 403), registra o erro e utiliza os dados parciais.
-      let appmaxOrder = orderData;
-      if (event.startsWith('Order')) {
-        logger.info(`Buscando dados completos do pedido Appmax #${orderData.id}`);
-        try {
-          appmaxOrder = await appmaxService.getOrderById(orderData.id);
-        } catch (error) {
-          logger.error(`Erro ao buscar pedido #${orderData.id} na Appmax:`, error);
-          if (error.response && error.response.status === 403) {
-            logger.warn(`Erro 403 na busca de dados completos. Utilizando dados parciais para o pedido #${orderData.id}`);
-            // Continua utilizando os dados parciais
-            appmaxOrder = orderData;
-          } else {
-            throw error;
-          }
-        }
-      }
+      const appmaxOrder = orderData;
 
-      // Processa o evento recebido conforme seu tipo
       switch (event) {
         case 'OrderApproved':
           await this.handleOrderApproved(appmaxOrder);
