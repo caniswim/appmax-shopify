@@ -18,6 +18,14 @@ class ShopifyService {
       }
     });
 
+    this.graphqlClient = axios.create({
+      baseURL: `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-01/graphql.json`,
+      headers: {
+        'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN,
+        'Content-Type': 'application/json'
+      }
+    });
+
     // Configura interceptor para tratar erros de resposta da Shopify
     this.client.interceptors.response.use(
       response => response,
@@ -358,39 +366,33 @@ async findOrderByAppmaxId(appmaxId) {
   /**
    * Atualiza um pedido existente na Shopify com os dados da Appmax.
    */
-  async updateOrder(orderId, { appmaxOrder, status, financialStatus, skipPaymentCapture = false }) {
+  async updateOrder(orderId, { appmaxOrder, status, financialStatus }) {
     try {
       logger.info(`Iniciando atualização do pedido Shopify #${orderId}. Status: ${status}, Financial Status: ${financialStatus}`);
+      
+      // Prepara os dados para atualização
       const updateData = {
         order: {
           id: orderId,
-          tags: [appmaxOrder.status, `appmax_status_${status}`].filter(Boolean),
+          tags: this.formatTags(appmaxOrder, status),
           note_attributes: this.formatNoteAttributes(appmaxOrder)
         }
       };
 
       logger.info(`Atualizando pedido Shopify #${orderId}:`, updateData);
-      const { data } = await this.makeRequest(() =>
+      
+      // Atualiza os dados básicos do pedido
+      const { data: updatedOrder } = await this.makeRequest(() =>
         this.client.put(`/orders/${orderId}.json`, updateData)
       );
 
-      // Atualiza o status financeiro do pedido de acordo com o evento
-      if (financialStatus === 'paid' && data.order.financial_status !== 'paid' && !skipPaymentCapture) {
-        logger.info(`Capturando pagamento para pedido Shopify #${orderId}`);
-        await this.capturePayment(orderId);
-        return await this.getOrder(orderId);
-      } else if (financialStatus === 'refunded' && data.order.financial_status !== 'refunded') {
-        logger.info(`Reembolsando pedido Shopify #${orderId}`);
-        await this.refundOrder(orderId);
-        return await this.getOrder(orderId);
-      } else if (financialStatus === 'cancelled' || status === 'cancelled') {
-        logger.info(`Cancelando pedido Shopify #${orderId}`);
-        await this.cancelOrder(orderId);
-        return await this.getOrder(orderId);
+      // Se o status financeiro for 'paid', marca o pedido como pago via GraphQL
+      if (financialStatus === 'paid') {
+        logger.info(`Marcando pedido #${orderId} como pago`);
+        await this.markOrderAsPaid(orderId);
       }
 
-      logger.info(`Pedido Shopify #${orderId} atualizado com sucesso. Novo status: ${data.order.financial_status}`);
-      return data.order;
+      return updatedOrder.order;
     } catch (error) {
       logger.error(`Erro ao atualizar pedido Shopify #${orderId}:`, error);
       throw new AppError(`Erro ao atualizar pedido na Shopify: ${error.message}`, error.response?.status || 500);
@@ -777,6 +779,69 @@ async findOrderByAppmaxId(appmaxId) {
       logger.error(`Erro ao cancelar pedido Shopify #${orderId}:`, error);
       throw new AppError(`Erro ao cancelar pedido na Shopify: ${error.message}`, error.response?.status || 500);
     }
+  }
+
+  /**
+   * Executa uma query/mutation GraphQL na API da Shopify
+   */
+  async graphql(query, variables = {}) {
+    try {
+      const { data } = await this.graphqlClient.post('', {
+        query,
+        variables
+      });
+
+      if (data.errors) {
+        const errorMessage = data.errors.map(e => e.message).join('; ');
+        throw new AppError(`Erro na chamada GraphQL: ${errorMessage}`, 400);
+      }
+
+      return data.data;
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw new AppError(`Erro ao executar query GraphQL: ${error.message}`, error.response?.status || 500);
+    }
+  }
+
+  /**
+   * Marca um pedido como pago usando a mutation orderMarkAsPaid
+   */
+  async markOrderAsPaid(orderId) {
+    const mutation = `
+      mutation orderMarkAsPaid($input: OrderMarkAsPaidInput!) {
+        orderMarkAsPaid(input: $input) {
+          order {
+            id
+            displayFinancialStatus
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const variables = {
+      input: {
+        id: `gid://shopify/Order/${orderId}`
+      }
+    };
+
+    logger.info(`Marcando pedido #${orderId} como pago via GraphQL`);
+    const result = await this.graphql(mutation, variables);
+
+    if (result.orderMarkAsPaid.userErrors?.length > 0) {
+      const errors = result.orderMarkAsPaid.userErrors.map(e => e.message).join('; ');
+      throw new AppError(`Erro ao marcar pedido como pago: ${errors}`, 400);
+    }
+
+    return result.orderMarkAsPaid.order;
+  }
+
+  formatTags(appmaxOrder, status) {
+    const tags = [appmaxOrder.status, `appmax_status_${status}`];
+    return tags.filter(Boolean);
   }
 }
 
