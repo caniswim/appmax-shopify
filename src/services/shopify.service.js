@@ -361,25 +361,142 @@ async findOrderByAppmaxId(appmaxId) {
   async updateOrder(orderId, { appmaxOrder, status, financialStatus }) {
     try {
       logger.info(`Iniciando atualização do pedido Shopify #${orderId}. Status: ${status}, Financial Status: ${financialStatus}`);
-      const mappedFinancialStatus = this.mapFinancialStatus(financialStatus);
       const updateData = {
         order: {
           id: orderId,
-          financial_status: mappedFinancialStatus,
           tags: [appmaxOrder.status, `appmax_status_${status}`].filter(Boolean),
           note_attributes: this.formatNoteAttributes(appmaxOrder)
-          // Removido o campo additional_details, pois não é suportado pela API da Shopify
         }
       };
+
       logger.info(`Atualizando pedido Shopify #${orderId}:`, updateData);
       const { data } = await this.makeRequest(() =>
         this.client.put(`/orders/${orderId}.json`, updateData)
       );
+
+      // Atualiza o status financeiro do pedido de acordo com o evento
+      if (financialStatus === 'paid' && data.order.financial_status !== 'paid') {
+        logger.info(`Capturando pagamento para pedido Shopify #${orderId}`);
+        await this.capturePayment(orderId);
+        return await this.getOrder(orderId);
+      } else if (financialStatus === 'refunded' && data.order.financial_status !== 'refunded') {
+        logger.info(`Reembolsando pedido Shopify #${orderId}`);
+        await this.refundOrder(orderId);
+        return await this.getOrder(orderId);
+      } else if (financialStatus === 'cancelled' || status === 'cancelled') {
+        logger.info(`Cancelando pedido Shopify #${orderId}`);
+        await this.cancelOrder(orderId);
+        return await this.getOrder(orderId);
+      }
+
       logger.info(`Pedido Shopify #${orderId} atualizado com sucesso. Novo status: ${data.order.financial_status}`);
       return data.order;
     } catch (error) {
       logger.error(`Erro ao atualizar pedido Shopify #${orderId}:`, error);
       throw new AppError(`Erro ao atualizar pedido na Shopify: ${error.message}`, error.response?.status || 500);
+    }
+  }
+
+  /**
+   * Busca um pedido específico na Shopify
+   */
+  async getOrder(orderId) {
+    try {
+      const { data } = await this.makeRequest(() =>
+        this.client.get(`/orders/${orderId}.json`)
+      );
+      return data.order;
+    } catch (error) {
+      logger.error(`Erro ao buscar pedido Shopify #${orderId}:`, error);
+      throw new AppError(`Erro ao buscar pedido na Shopify: ${error.message}`, error.response?.status || 500);
+    }
+  }
+
+  /**
+   * Captura o pagamento de um pedido na Shopify
+   */
+  async capturePayment(orderId) {
+    try {
+      // Primeiro, busca as transações do pedido
+      const { data: transactionsData } = await this.makeRequest(() =>
+        this.client.get(`/orders/${orderId}/transactions.json`)
+      );
+
+      // Encontra a transação autorizada mais recente
+      const authorizedTransaction = transactionsData.transactions
+        .reverse()
+        .find(t => t.kind === 'authorization' && t.status === 'success');
+
+      if (!authorizedTransaction) {
+        throw new AppError('Nenhuma transação autorizada encontrada para captura', 400);
+      }
+
+      // Captura o pagamento
+      const { data } = await this.makeRequest(() =>
+        this.client.post(`/orders/${orderId}/transactions.json`, {
+          transaction: {
+            kind: 'capture',
+            parent_id: authorizedTransaction.id
+          }
+        })
+      );
+
+      logger.info(`Pagamento capturado com sucesso para pedido Shopify #${orderId}`);
+      return data.transaction;
+    } catch (error) {
+      logger.error(`Erro ao capturar pagamento do pedido Shopify #${orderId}:`, error);
+      throw new AppError(`Erro ao capturar pagamento na Shopify: ${error.message}`, error.response?.status || 500);
+    }
+  }
+
+  /**
+   * Reembolsa um pedido na Shopify
+   */
+  async refundOrder(orderId) {
+    try {
+      // Primeiro, busca as transações do pedido
+      const { data: transactionsData } = await this.makeRequest(() =>
+        this.client.get(`/orders/${orderId}/transactions.json`)
+      );
+
+      // Encontra a transação de captura mais recente
+      const captureTransaction = transactionsData.transactions
+        .reverse()
+        .find(t => t.kind === 'capture' && t.status === 'success');
+
+      if (!captureTransaction) {
+        throw new AppError('Nenhuma transação capturada encontrada para reembolso', 400);
+      }
+
+      // Calcula o valor total do pedido
+      const { data: orderData } = await this.makeRequest(() =>
+        this.client.get(`/orders/${orderId}.json`)
+      );
+
+      // Cria o reembolso
+      const { data } = await this.makeRequest(() =>
+        this.client.post(`/orders/${orderId}/refunds.json`, {
+          refund: {
+            currency: orderData.order.currency,
+            notify: true,
+            note: 'Reembolso automático via Appmax',
+            shipping: {
+              full_refund: true
+            },
+            refund_line_items: orderData.order.line_items.map(item => ({
+              line_item_id: item.id,
+              quantity: item.quantity,
+              restock: false
+            }))
+          }
+        })
+      );
+
+      logger.info(`Reembolso criado com sucesso para pedido Shopify #${orderId}`);
+      return data.refund;
+    } catch (error) {
+      logger.error(`Erro ao reembolsar pedido Shopify #${orderId}:`, error);
+      throw new AppError(`Erro ao reembolsar pedido na Shopify: ${error.message}`, error.response?.status || 500);
     }
   }
 
@@ -648,52 +765,17 @@ async findOrderByAppmaxId(appmaxId) {
     return statusMap[status] || 'pending';
   }
 
-  async cancelOrder(appmaxOrder) {
+  async cancelOrder(orderId) {
     try {
-      const existingOrder = await this.findOrderByAppmaxId(appmaxOrder.id);
-      if (!existingOrder) {
-        logger.info(`Pedido Appmax #${appmaxOrder.id} não encontrado na Shopify para cancelamento`);
-        return null;
-      }
-      const { data } = await this.client.post(`/orders/${existingOrder.id}/cancel.json`);
+      logger.info(`Cancelando pedido Shopify #${orderId}`);
+      const { data } = await this.makeRequest(() =>
+        this.client.post(`/orders/${orderId}/cancel.json`)
+      );
+      logger.info(`Pedido Shopify #${orderId} cancelado com sucesso`);
       return data.order;
     } catch (error) {
-      logger.error('Erro ao cancelar pedido na Shopify:', error);
-      throw error;
-    }
-  }
-
-  async refundOrder(appmaxOrder) {
-    try {
-      const existingOrder = await this.findOrderByAppmaxId(appmaxOrder.id);
-      if (!existingOrder) {
-        logger.info(`Pedido Appmax #${appmaxOrder.id} não encontrado na Shopify para reembolso`);
-        return null;
-      }
-      const { data: transactionsData } = await this.client.get(`/orders/${existingOrder.id}/transactions.json`);
-      const paymentTransaction = transactionsData.transactions.find(
-        t => t.kind === 'sale' || t.kind === 'capture'
-      );
-      if (!paymentTransaction) {
-        throw new Error('Transação de pagamento não encontrada');
-      }
-      const refundData = {
-        refund: {
-          currency: existingOrder.currency,
-          notify: true,
-          note: `Reembolso automático - Appmax #${appmaxOrder.id}`,
-          transactions: [{
-            parent_id: paymentTransaction.id,
-            amount: existingOrder.total_price,
-            kind: 'refund'
-          }]
-        }
-      };
-      const { data } = await this.client.post(`/orders/${existingOrder.id}/refunds.json`, refundData);
-      return data.refund;
-    } catch (error) {
-      logger.error('Erro ao reembolsar pedido na Shopify:', error);
-      throw error;
+      logger.error(`Erro ao cancelar pedido Shopify #${orderId}:`, error);
+      throw new AppError(`Erro ao cancelar pedido na Shopify: ${error.message}`, error.response?.status || 500);
     }
   }
 }
