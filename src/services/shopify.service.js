@@ -194,6 +194,13 @@ class ShopifyService {
       if (!appmaxOrder) {
         throw new AppError('Dados do pedido Appmax inválidos', 400);
       }
+
+      // Se o evento for OrderIntegrated, força o status como paid
+      if (appmaxOrder.event === 'OrderIntegrated') {
+        status = 'paid';
+        financialStatus = 'paid';
+        logger.info(`Evento OrderIntegrated recebido para pedido Appmax #${appmaxOrder.id}, forçando status para paid`);
+      }
       
       // Adquire lock do pedido com timeout para evitar deadlock
       await this.lockOrder(appmaxOrder.id);
