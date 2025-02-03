@@ -144,11 +144,22 @@ class ShopifyService {
       if (!appmaxOrder || !appmaxOrder.id) {
         throw new AppError('Dados do pedido Appmax inválidos', 400);
       }
+
+      // Define os status corretos baseado no evento
+      let finalStatus = status;
+      let finalFinancialStatus = financialStatus;
+
+      if (appmaxOrder.event === 'OrderIntegrated') {
+        finalStatus = 'paid';
+        finalFinancialStatus = 'paid';
+        logger.info(`Evento OrderIntegrated detectado para pedido Appmax #${appmaxOrder.id}, definindo status como paid`);
+      }
+
       const requestId = await db.saveQueueRequest({
         appmaxId: appmaxOrder.id,
         eventType: appmaxOrder.event || 'unknown',
-        status: status || 'pending',
-        financialStatus: financialStatus || 'pending',
+        status: finalStatus || 'pending',
+        financialStatus: finalFinancialStatus || 'pending',
         requestData: appmaxOrder
       });
       logger.info(`Requisição #${requestId} adicionada à fila para pedido Appmax #${appmaxOrder.id}`);
@@ -368,6 +379,14 @@ async findOrderByAppmaxId(appmaxId) {
   async updateOrder(orderId, { appmaxOrder, status, financialStatus }) {
     try {
       logger.info(`Iniciando atualização do pedido Shopify #${orderId}. Status: ${status}, Financial Status: ${financialStatus}`);
+
+      // Se for OrderIntegrated, força o status como paid
+      if (appmaxOrder.event === 'OrderIntegrated') {
+        status = 'paid';
+        financialStatus = 'paid';
+        logger.info(`Evento OrderIntegrated detectado, forçando status para paid`);
+      }
+
       const updateData = {
         order: {
           id: orderId,
@@ -382,7 +401,7 @@ async findOrderByAppmaxId(appmaxId) {
       );
 
       // Atualiza o status financeiro do pedido de acordo com o evento
-      if (financialStatus === 'paid' && data.order.financial_status !== 'paid') {
+      if ((financialStatus === 'paid' || appmaxOrder.event === 'OrderIntegrated') && data.order.financial_status !== 'paid') {
         logger.info(`Capturando pagamento para pedido Shopify #${orderId}`);
         await this.capturePayment(orderId);
         return await this.getOrder(orderId);
