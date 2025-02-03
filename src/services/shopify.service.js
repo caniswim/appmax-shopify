@@ -358,7 +358,7 @@ async findOrderByAppmaxId(appmaxId) {
   /**
    * Atualiza um pedido existente na Shopify com os dados da Appmax.
    */
-  async updateOrder(orderId, { appmaxOrder, status, financialStatus }) {
+  async updateOrder(orderId, { appmaxOrder, status, financialStatus, skipPaymentCapture = false }) {
     try {
       logger.info(`Iniciando atualização do pedido Shopify #${orderId}. Status: ${status}, Financial Status: ${financialStatus}`);
       const updateData = {
@@ -375,7 +375,7 @@ async findOrderByAppmaxId(appmaxId) {
       );
 
       // Atualiza o status financeiro do pedido de acordo com o evento
-      if (financialStatus === 'paid' && data.order.financial_status !== 'paid') {
+      if (financialStatus === 'paid' && data.order.financial_status !== 'paid' && !skipPaymentCapture) {
         logger.info(`Capturando pagamento para pedido Shopify #${orderId}`);
         await this.capturePayment(orderId);
         return await this.getOrder(orderId);

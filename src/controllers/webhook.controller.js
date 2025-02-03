@@ -38,11 +38,20 @@ class WebhookController {
         case 'OrderApproved':
         case 'OrderPaid':
         case 'OrderPaidByPix':
-        case 'OrderIntegrated':
           await shopifyService.createOrUpdateOrder({
             appmaxOrder: orderData,
             status: 'paid',
             financialStatus: 'paid'
+          });
+          break;
+
+        case 'OrderIntegrated':
+          // Para pedidos já integrados, apenas atualizamos as tags e atributos, sem tentar capturar pagamento
+          await shopifyService.createOrUpdateOrder({
+            appmaxOrder: orderData,
+            status: 'paid',
+            financialStatus: 'paid',
+            skipPaymentCapture: true // Adicionamos esta flag para evitar a captura
           });
           break;
 
