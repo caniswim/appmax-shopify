@@ -1,5 +1,4 @@
 const shopifyService = require('../services/shopify.service');
-const appmaxService = require('../services/appmax.service');
 const logger = require('../utils/logger');
 const AppError = require('../utils/AppError');
 
@@ -13,7 +12,7 @@ class WebhookController {
     return order && Array.isArray(order.bundles) && order.customer;
   }
 
-  async handleAppmax(req, res, next) {
+  async handleWebhook(req, res, next) {
     try {
       // Extrai o evento e os dados do webhook
       const { event, data } = req.body;
@@ -34,72 +33,56 @@ class WebhookController {
         customer: `${firstName} ${lastName}`.trim()
       });
 
-      // Para eventos de pedidos, tenta buscar os dados completos via API da Appmax.
-      // Se a chamada falhar (por exemplo, retornar 403), registra o erro e utiliza os dados parciais.
-      let appmaxOrder = orderData;
-      if (event.startsWith('Order')) {
-        logger.info(`Buscando dados completos do pedido Appmax #${orderData.id}`);
-        try {
-          appmaxOrder = await appmaxService.getOrderById(orderData.id);
-        } catch (error) {
-          logger.error(`Erro ao buscar pedido #${orderData.id} na Appmax:`, error);
-          if (error.response && error.response.status === 403) {
-            logger.warn(`Erro 403 na busca de dados completos. Utilizando dados parciais para o pedido #${orderData.id}`);
-            // Continua utilizando os dados parciais
-            appmaxOrder = orderData;
-          } else {
-            throw error;
-          }
-        }
-      }
-
       // Processa o evento recebido conforme seu tipo
       switch (event) {
         case 'OrderApproved':
-          await this.handleOrderApproved(appmaxOrder);
-          break;
         case 'OrderPaid':
-          await this.handleOrderPaid(appmaxOrder);
-          break;
-        case 'OrderRefund':
-          await this.handleOrderRefund(appmaxOrder);
-          break;
-        case 'PaymentNotAuthorized':
-          await this.handlePaymentNotAuthorized(appmaxOrder);
-          break;
-        case 'OrderAuthorized':
-          await this.handleOrderAuthorized(appmaxOrder);
-          break;
-        case 'PendingIntegration':
-          logger.info(`Pedido ${appmaxOrder.id} pendente de integração`, appmaxOrder);
-          break;
-        case 'PixGenerated':
-          await this.handlePixGenerated(appmaxOrder);
-          break;
-        case 'PixExpired':
-          await this.handlePixExpired(appmaxOrder);
-          break;
-        case 'OrderIntegrated':
-          await this.handleOrderIntegrated(appmaxOrder);
-          break;
-        case 'BoletoExpired':
-          await this.handleBoletoExpired(appmaxOrder);
-          break;
-        case 'ChargebackDispute':
-          await this.handleChargebackDispute(appmaxOrder);
-          break;
-        case 'ChargebackWon':
-          await this.handleChargebackWon(appmaxOrder);
-          break;
-        case 'OrderBilletCreated':
-          await this.handleOrderBilletCreated(appmaxOrder);
-          break;
-        case 'OrderPixCreated':
-          await this.handleOrderPixCreated(appmaxOrder);
-          break;
         case 'OrderPaidByPix':
-          await this.handleOrderPaid(appmaxOrder);
+        case 'OrderIntegrated':
+          await shopifyService.createOrUpdateOrder({
+            appmaxOrder: orderData,
+            status: 'paid',
+            financialStatus: 'paid'
+          });
           break;
+
+        case 'OrderRefund':
+          await shopifyService.refundOrder(orderData);
+          break;
+
+        case 'PaymentNotAuthorized':
+        case 'PixExpired':
+        case 'BoletoExpired':
+          await shopifyService.cancelOrder(orderData);
+          break;
+
+        case 'OrderAuthorized':
+        case 'PixGenerated':
+        case 'OrderBilletCreated':
+        case 'OrderPixCreated':
+          await shopifyService.createOrUpdateOrder({
+            appmaxOrder: orderData,
+            status: 'pending',
+            financialStatus: 'pending'
+          });
+          break;
+
+        case 'ChargebackDispute':
+          await shopifyService.createOrUpdateOrder({
+            appmaxOrder: orderData,
+            status: 'under_review',
+            financialStatus: 'pending'
+          });
+          break;
+
+        case 'ChargebackWon':
+          await shopifyService.createOrUpdateOrder({
+            appmaxOrder: orderData,
+            status: 'authorized',
+            financialStatus: 'paid'
+          });
+          break;
+
         default:
           logger.info(`Evento não tratado: ${event}`);
       }
@@ -111,110 +94,6 @@ class WebhookController {
       }
       next(new AppError('Erro interno ao processar webhook', 500));
     }
-  }
-
-  async handleOrderApproved(data) {
-    const order = await shopifyService.createOrUpdateOrder({
-      appmaxOrder: data,
-      status: 'paid',
-      financialStatus: 'paid'
-    });
-    logger.info(`Pedido Appmax #${data.id} criado/atualizado na Shopify: #${order.id}`);
-  }
-
-  async handleOrderPaid(data) {
-    const order = await shopifyService.createOrUpdateOrder({
-      appmaxOrder: data,
-      status: 'paid',
-      financialStatus: 'paid'
-    });
-    logger.info(`Pedido Appmax #${data.id} marcado como pago na Shopify: #${order.id}`);
-  }
-
-  async handleOrderRefund(data) {
-    const order = await shopifyService.refundOrder(data);
-    logger.info(`Pedido Appmax #${data.id} reembolsado na Shopify: #${order.id}`);
-  }
-
-  async handlePaymentNotAuthorized(data) {
-    const order = await shopifyService.cancelOrder(data);
-    logger.info(`Pedido Appmax #${data.id} cancelado na Shopify: #${order.id}`);
-  }
-
-  async handleOrderAuthorized(data) {
-    const order = await shopifyService.createOrUpdateOrder({
-      appmaxOrder: data,
-      status: 'pending',
-      financialStatus: 'pending'
-    });
-    logger.info(`Pedido Appmax #${data.id} criado/atualizado na Shopify como pendente: #${order.id}`);
-  }
-
-  async handlePixGenerated(data) {
-    const order = await shopifyService.createOrUpdateOrder({
-      appmaxOrder: data,
-      status: 'pending',
-      financialStatus: 'pending'
-    });
-    logger.info(`Pedido Appmax #${data.id} com Pix gerado atualizado na Shopify: #${order.id}`);
-  }
-
-  async handlePixExpired(data) {
-    const order = await shopifyService.cancelOrder(data);
-    logger.info(`Pedido Appmax #${data.id} com Pix expirado cancelado na Shopify: #${order.id}`);
-  }
-
-  async handleOrderIntegrated(data) {
-    // Alteramos os parâmetros para que o pedido seja atualizado para "paid"
-    const order = await shopifyService.createOrUpdateOrder({
-      appmaxOrder: data,
-      status: 'paid',
-      financialStatus: 'paid'
-    });
-    
-    logger.info(`Pedido Appmax #${data.id} integrado na Shopify: #${order.id}`);
-  }
-  
-
-  async handleBoletoExpired(data) {
-    const order = await shopifyService.cancelOrder(data);
-    logger.info(`Pedido Appmax #${data.id} com boleto vencido cancelado na Shopify: #${order.id}`);
-  }
-
-  async handleChargebackDispute(data) {
-    const order = await shopifyService.createOrUpdateOrder({
-      appmaxOrder: data,
-      status: 'under_review',
-      financialStatus: 'pending'
-    });
-    logger.info(`Pedido Appmax #${data.id} em disputa de chargeback na Shopify: #${order.id}`);
-  }
-
-  async handleChargebackWon(data) {
-    const order = await shopifyService.createOrUpdateOrder({
-      appmaxOrder: data,
-      status: 'authorized',
-      financialStatus: 'paid'
-    });
-    logger.info(`Pedido Appmax #${data.id} com chargeback ganho na Shopify: #${order.id}`);
-  }
-
-  async handleOrderBilletCreated(data) {
-    const order = await shopifyService.createOrUpdateOrder({
-      appmaxOrder: data,
-      status: 'pending',
-      financialStatus: 'pending'
-    });
-    logger.info(`Pedido Appmax #${data.id} com boleto criado na Shopify: #${order.id}`);
-  }
-
-  async handleOrderPixCreated(data) {
-    const order = await shopifyService.createOrUpdateOrder({
-      appmaxOrder: data,
-      status: 'pending',
-      financialStatus: 'pending'
-    });
-    logger.info(`Pedido Appmax #${data.id} com Pix criado na Shopify: #${order.id}`);
   }
 }
 
