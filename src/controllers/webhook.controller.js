@@ -123,7 +123,7 @@ class WebhookController {
     const order = await shopifyService.createOrUpdateOrder({
       appmaxOrder: data,
       status: 'pending',
-      financialStatus: 'pending'
+      financialStatus: 'paid'
     });
     logger.info(`Pedido Appmax #${data.id} criado/atualizado na Shopify como pendente: #${order.id}`);
   }
@@ -146,7 +146,7 @@ class WebhookController {
     const order = await shopifyService.createOrUpdateOrder({
       appmaxOrder: data,
       status: 'pending',
-      financialStatus: 'pending'
+      financialStatus: 'paid'
     });
     logger.info(`Pedido Appmax #${data.id} integrado na Shopify: #${order.id}`);
   }
