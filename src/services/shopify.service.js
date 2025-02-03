@@ -370,6 +370,10 @@ async findOrderByAppmaxId(appmaxId) {
     try {
       logger.info(`Iniciando atualização do pedido Shopify #${orderId}. Status: ${status}, Financial Status: ${financialStatus}`);
       
+      // Busca o status atual do pedido
+      const currentOrder = await this.getOrder(orderId);
+      logger.info(`Status atual do pedido #${orderId}: ${currentOrder.financial_status}`);
+
       // Prepara os dados para atualização
       const updateData = {
         order: {
@@ -388,11 +392,25 @@ async findOrderByAppmaxId(appmaxId) {
 
       // Atualiza o status do pedido via GraphQL de acordo com o status solicitado
       if (status === 'cancelled' || financialStatus === 'cancelled') {
-        await this.cancelOrder(orderId);
+        if (currentOrder.financial_status !== 'voided') {
+          await this.cancelOrder(orderId);
+        }
       } else if (financialStatus === 'refunded') {
-        await this.refundOrder(orderId);
+        if (currentOrder.financial_status !== 'refunded') {
+          await this.refundOrder(orderId);
+        }
       } else if (financialStatus === 'paid') {
-        await this.markOrderAsPaid(orderId);
+        // Só tenta marcar como pago se o pedido não estiver já pago ou reembolsado
+        if (!['paid', 'refunded', 'voided'].includes(currentOrder.financial_status)) {
+          try {
+            await this.markOrderAsPaid(orderId);
+          } catch (error) {
+            // Se não conseguir marcar como pago via GraphQL, registra o erro mas não falha
+            logger.warn(`Não foi possível marcar o pedido #${orderId} como pago via GraphQL: ${error.message}`);
+          }
+        } else {
+          logger.info(`Pedido #${orderId} já está com status ${currentOrder.financial_status}, não será atualizado`);
+        }
       }
 
       return updatedOrder.order;
