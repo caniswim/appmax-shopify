@@ -35,6 +35,12 @@ class WebhookController {
         throw new AppError('Dados do webhook inválidos', 400);
       }
 
+      // Ignora o evento CustomerInterested
+      if (event === 'CustomerInterested') {
+        logger.info(`Ignorando evento ${event} para o pedido #${data.id || 'N/A'}`);
+        return res.status(200).json({ success: true, message: 'Evento ignorado' });
+      }
+
       // Caso os dados do pedido estejam aninhados em "order", utiliza-os; caso contrário, usa o objeto data
       const orderData = data.order || data;
 

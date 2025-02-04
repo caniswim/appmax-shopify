@@ -476,6 +476,12 @@ class Database {
   }
 
   async saveAppmaxOrder(appmaxId, status = 'pending', metadata = {}) {
+    // Verifica se é um evento que deve ser ignorado
+    if (metadata.event === 'CustomerInterested') {
+      logger.info(`Ignorando salvamento do evento ${metadata.event} para o pedido #${appmaxId}`);
+      return null;
+    }
+
     return this.saveOrder({
       appmaxId,
       platform: 'appmax',
