@@ -35,17 +35,16 @@ class Database {
             if (!row) {
               // Cria a tabela se não existir
               this.db.run(`
-                CREATE TABLE orders (
+                CREATE TABLE IF NOT EXISTS orders (
                   id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  appmax_id INTEGER UNIQUE,
-                  shopify_id TEXT,
+                  appmax_id TEXT UNIQUE NOT NULL,
                   woocommerce_id TEXT,
+                  shopify_id TEXT,
                   session_id TEXT,
-                  platform TEXT NOT NULL,
                   status TEXT,
+                  metadata TEXT,
                   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                  metadata TEXT
+                  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
               `);
             } else {
