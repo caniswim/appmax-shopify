@@ -27,10 +27,16 @@ class Database {
           // Tabela de pedidos existente
           this.db.run(`
             CREATE TABLE IF NOT EXISTS orders (
-              appmax_id INTEGER PRIMARY KEY,
-              shopify_id TEXT NOT NULL,
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              appmax_id INTEGER UNIQUE,
+              shopify_id TEXT,
+              woocommerce_id TEXT,
+              session_id TEXT,
+              platform TEXT NOT NULL,
+              status TEXT,
               created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-              updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+              updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+              metadata TEXT
             )
           `);
 
@@ -185,6 +191,166 @@ class Database {
           }
         }
       );
+    });
+  }
+
+  async findOrderById(id, type = 'appmax') {
+    const fieldMap = {
+      'appmax': 'appmax_id',
+      'shopify': 'shopify_id',
+      'woocommerce': 'woocommerce_id',
+      'session': 'session_id'
+    };
+
+    const field = fieldMap[type] || 'id';
+    
+    return new Promise((resolve, reject) => {
+      this.db.get(
+        `SELECT * FROM orders WHERE ${field} = ?`,
+        [id],
+        (err, row) => {
+          if (err) {
+            logger.error(`Erro ao buscar pedido por ${type}_id:`, err);
+            reject(err);
+          } else {
+            if (row && row.metadata) {
+              try {
+                row.metadata = JSON.parse(row.metadata);
+              } catch (e) {
+                logger.warn(`Erro ao fazer parse do metadata do pedido ${row.id}:`, e);
+                row.metadata = {};
+              }
+            }
+            resolve(row);
+          }
+        }
+      );
+    });
+  }
+
+  async saveOrder({
+    appmaxId = null,
+    shopifyId = null,
+    woocommerceId = null,
+    sessionId = null,
+    platform,
+    status = 'pending',
+    metadata = {}
+  }) {
+    if (!platform) {
+      throw new Error('Platform é obrigatório');
+    }
+
+    const metadataStr = JSON.stringify(metadata);
+
+    return new Promise((resolve, reject) => {
+      // Primeiro tenta encontrar um pedido existente por qualquer um dos IDs
+      const findExisting = async () => {
+        if (appmaxId) return await this.findOrderById(appmaxId, 'appmax');
+        if (shopifyId) return await this.findOrderById(shopifyId, 'shopify');
+        if (woocommerceId) return await this.findOrderById(woocommerceId, 'woocommerce');
+        if (sessionId) return await this.findOrderById(sessionId, 'session');
+        return null;
+      };
+
+      findExisting().then(existingOrder => {
+        if (existingOrder) {
+          // Atualiza o pedido existente
+          this.db.run(
+            `UPDATE orders 
+             SET appmax_id = COALESCE(?, appmax_id),
+                 shopify_id = COALESCE(?, shopify_id),
+                 woocommerce_id = COALESCE(?, woocommerce_id),
+                 session_id = COALESCE(?, session_id),
+                 platform = ?,
+                 status = ?,
+                 metadata = ?,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?`,
+            [appmaxId, shopifyId, woocommerceId, sessionId, platform, status, metadataStr, existingOrder.id],
+            (err) => {
+              if (err) {
+                logger.error('Erro ao atualizar pedido:', err);
+                reject(err);
+              } else {
+                logger.info(`Pedido atualizado: ID ${existingOrder.id}`);
+                resolve(existingOrder.id);
+              }
+            }
+          );
+        } else {
+          // Insere novo pedido
+          this.db.run(
+            `INSERT INTO orders (
+              appmax_id, shopify_id, woocommerce_id, session_id,
+              platform, status, metadata
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [appmaxId, shopifyId, woocommerceId, sessionId, platform, status, metadataStr],
+            function(err) {
+              if (err) {
+                logger.error('Erro ao inserir novo pedido:', err);
+                reject(err);
+              } else {
+                logger.info(`Novo pedido inserido: ID ${this.lastID}`);
+                resolve(this.lastID);
+              }
+            }
+          );
+        }
+      }).catch(reject);
+    });
+  }
+
+  async updateOrderStatus(orderId, status, metadata = {}) {
+    return new Promise((resolve, reject) => {
+      const currentMetadata = {};
+      Object.assign(currentMetadata, metadata);
+      
+      this.db.run(
+        `UPDATE orders 
+         SET status = ?,
+             metadata = ?,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [status, JSON.stringify(currentMetadata), orderId],
+        (err) => {
+          if (err) {
+            logger.error('Erro ao atualizar status do pedido:', err);
+            reject(err);
+          } else {
+            resolve();
+          }
+        }
+      );
+    });
+  }
+
+  async getOrdersByDateRange(startDate, endDate, platform = null) {
+    return new Promise((resolve, reject) => {
+      let query = `
+        SELECT * FROM orders 
+        WHERE created_at BETWEEN ? AND ?
+      `;
+      const params = [startDate, endDate];
+
+      if (platform) {
+        query += ` AND platform = ?`;
+        params.push(platform);
+      }
+
+      query += ` ORDER BY created_at DESC`;
+
+      this.db.all(query, params, (err, rows) => {
+        if (err) {
+          logger.error('Erro ao buscar pedidos por data:', err);
+          reject(err);
+        } else {
+          resolve(rows.map(row => ({
+            ...row,
+            metadata: row.metadata ? JSON.parse(row.metadata) : {}
+          })));
+        }
+      });
     });
   }
 }

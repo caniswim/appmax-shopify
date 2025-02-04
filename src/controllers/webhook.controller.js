@@ -1,21 +1,36 @@
 const shopifyService = require('../services/shopify.service');
 const logger = require('../utils/logger');
 const AppError = require('../utils/AppError');
+const db = require('../database/db');
 
 class WebhookController {
   /**
    * Verifica se os dados do pedido estão completos.
-   * Aqui, por exemplo, consideramos que o pedido é completo se possuir o array "bundles"
-   * (que contém os produtos) e informações do cliente.
    */
   hasFullOrderDetails(order) {
     return order && Array.isArray(order.bundles) && order.customer;
   }
 
+  /**
+   * Adiciona prefixo ao email para evitar emails transacionais da Shopify
+   */
+  formatEmailForShopify(email) {
+    if (!email) return null;
+    return email.includes('email_') ? email : `email_${email}`;
+  }
+
+  /**
+   * Remove o prefixo do email para armazenamento local
+   */
+  getOriginalEmail(email) {
+    if (!email) return null;
+    return email.replace(/^email_/, '');
+  }
+
   async handleWebhook(req, res, next) {
     try {
       // Extrai o evento e os dados do webhook
-      const { event, data } = req.body;
+      const { event, data, session_id } = req.body;
       if (!event || !data) {
         throw new AppError('Dados do webhook inválidos', 400);
       }
@@ -23,76 +38,114 @@ class WebhookController {
       // Caso os dados do pedido estejam aninhados em "order", utiliza-os; caso contrário, usa o objeto data
       const orderData = data.order || data;
 
-      // Extrai os nomes do cliente, considerando variações na nomenclatura (camelCase ou minúsculo)
+      // Extrai os nomes do cliente, considerando variações na nomenclatura
       const firstName = orderData.customer?.firstName || orderData.customer?.firstname || 'N/A';
       const lastName = orderData.customer?.lastName || orderData.customer?.lastname || '';
+      const customerName = `${firstName} ${lastName}`.trim();
+      const originalEmail = this.getOriginalEmail(orderData.customer?.email);
+
       logger.info('Webhook recebido:', {
         event,
         orderId: orderData.id,
         status: orderData.status,
-        customer: `${firstName} ${lastName}`.trim()
+        customer: customerName,
+        email: originalEmail,
+        session_id
       });
 
-      // Processa o evento recebido conforme seu tipo
+      // Prepara os metadados do pedido
+      const metadata = {
+        customer: {
+          name: customerName,
+          email: originalEmail
+        },
+        payment: {
+          method: orderData.payment?.method,
+          installments: orderData.payment?.installments
+        },
+        products: orderData.bundles,
+        raw_data: {
+          ...orderData,
+          customer: orderData.customer ? {
+            ...orderData.customer,
+            email: originalEmail
+          } : null
+        }
+      };
+
+      // Define o status baseado no evento
+      let status = 'pending';
+      let financialStatus = 'pending';
+
       switch (event) {
         case 'OrderApproved':
         case 'OrderPaid':
         case 'OrderPaidByPix':
-          await shopifyService.createOrUpdateOrder({
-            appmaxOrder: orderData,
-            status: 'paid',
-            financialStatus: 'paid'
-          });
-          break;
-
         case 'OrderIntegrated':
-          // Para pedidos já integrados, apenas atualizamos o status e marcamos como pago
-          await shopifyService.createOrUpdateOrder({
-            appmaxOrder: orderData,
-            status: 'paid',
-            financialStatus: 'paid'
-          });
-          break;
-
-        case 'OrderRefund':
-          await shopifyService.refundOrder(orderData);
+        case 'ChargebackWon':
+          status = 'paid';
+          financialStatus = 'paid';
           break;
 
         case 'PaymentNotAuthorized':
         case 'PixExpired':
         case 'BoletoExpired':
-          await shopifyService.cancelOrder(orderData);
+          status = 'cancelled';
+          financialStatus = 'cancelled';
+          break;
+
+        case 'OrderRefund':
+          status = 'refunded';
+          financialStatus = 'refunded';
+          break;
+
+        case 'ChargebackDispute':
+          status = 'under_review';
+          financialStatus = 'pending';
           break;
 
         case 'OrderAuthorized':
         case 'PixGenerated':
         case 'OrderBilletCreated':
         case 'OrderPixCreated':
-          await shopifyService.createOrUpdateOrder({
-            appmaxOrder: orderData,
-            status: 'pending',
-            financialStatus: 'pending'
-          });
+          status = 'pending';
+          financialStatus = 'pending';
           break;
+      }
 
-        case 'ChargebackDispute':
-          await shopifyService.createOrUpdateOrder({
-            appmaxOrder: orderData,
-            status: 'under_review',
-            financialStatus: 'pending'
-          });
-          break;
+      // Salva ou atualiza o pedido no banco local
+      await db.saveOrder({
+        appmaxId: orderData.id,
+        sessionId: session_id,
+        platform: 'appmax',
+        status,
+        metadata: {
+          ...metadata,
+          event,
+          financial_status: financialStatus
+        }
+      });
 
-        case 'ChargebackWon':
-          await shopifyService.createOrUpdateOrder({
-            appmaxOrder: orderData,
-            status: 'authorized',
-            financialStatus: 'paid'
-          });
-          break;
+      // Modifica o email no objeto antes de enviar para Shopify
+      const shopifyOrderData = {
+        ...orderData,
+        customer: orderData.customer ? {
+          ...orderData.customer,
+          email: this.formatEmailForShopify(orderData.customer.email)
+        } : null
+      };
 
-        default:
-          logger.info(`Evento não tratado: ${event}`);
+      // Processa o pedido no Shopify
+      if (status === 'cancelled') {
+        await shopifyService.cancelOrder(shopifyOrderData);
+      } else if (status === 'refunded') {
+        await shopifyService.refundOrder(shopifyOrderData);
+      } else {
+        await shopifyService.createOrUpdateOrder({
+          appmaxOrder: shopifyOrderData,
+          status,
+          financialStatus
+        });
       }
 
       res.status(200).json({ success: true });
