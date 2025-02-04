@@ -393,7 +393,7 @@ async findOrderByAppmaxId(appmaxId) {
       // Atualiza o status do pedido via GraphQL de acordo com o status solicitado
       if (status === 'cancelled' || financialStatus === 'cancelled') {
         if (currentOrder.financial_status !== 'voided') {
-          await this.cancelOrder(orderId);
+          await this.cancelOrder(updatedOrder.order);
         }
       } else if (financialStatus === 'refunded') {
         if (currentOrder.financial_status !== 'refunded') {
@@ -847,40 +847,67 @@ async findOrderByAppmaxId(appmaxId) {
   }
 
   /**
-   * Cancela um pedido usando a mutation orderCancel
+   * Cancela um pedido na Shopify
+   * @param {Object} orderData Dados do pedido
    */
-  async cancelOrder(orderId) {
-    const mutation = `
-      mutation orderCancel($input: OrderCancelInput!) {
-        orderCancel(input: $input) {
-          order {
-            id
-            displayFinancialStatus
-            cancelledAt
-          }
-          userErrors {
-            field
-            message
+  async cancelOrder(orderData) {
+    try {
+      // Busca o ID do pedido na Shopify
+      const shopifyId = await this.findShopifyOrderId(orderData.id);
+      
+      if (!shopifyId) {
+        logger.warn(`Pedido Appmax #${orderData.id} não encontrado na Shopify para cancelamento`);
+        return;
+      }
+
+      logger.info(`Cancelando pedido #${shopifyId} na Shopify`);
+
+      const mutation = `
+        mutation orderCancel($orderId: ID!, $reason: OrderCancelReason!) {
+          orderCancel(
+            orderId: $orderId,
+            reason: $reason
+          ) {
+            order {
+              id
+              displayFinancialStatus
+              cancelledAt
+            }
+            userErrors {
+              field
+              message
+            }
           }
         }
+      `;
+
+      const variables = {
+        orderId: `gid://shopify/Order/${shopifyId}`,
+        reason: "CUSTOMER" // CUSTOMER, INVENTORY, FRAUD, DECLINED, OTHER
+      };
+
+      const result = await this.graphql(mutation, variables);
+
+      if (result.userErrors && result.userErrors.length > 0) {
+        throw new Error(`Erro ao cancelar pedido: ${result.userErrors[0].message}`);
       }
-    `;
 
-    const variables = {
-      input: {
-        id: `gid://shopify/Order/${orderId}`
-      }
-    };
+      logger.info(`Pedido #${shopifyId} cancelado com sucesso na Shopify`);
+      
+      // Atualiza o status no banco local
+      await db.updateOrderStatus(shopifyId, 'cancelled', {
+        cancelled_at: new Date().toISOString(),
+        cancel_reason: 'CUSTOMER'
+      });
 
-    logger.info(`Cancelando pedido #${orderId} via GraphQL`);
-    const result = await this.graphql(mutation, variables);
-
-    if (result.orderCancel.userErrors?.length > 0) {
-      const errors = result.orderCancel.userErrors.map(e => e.message).join('; ');
-      throw new AppError(`Erro ao cancelar pedido: ${errors}`, 400);
+    } catch (error) {
+      logger.error('Erro ao cancelar pedido na Shopify:', {
+        error: error.message,
+        orderId: orderData.id,
+        shopifyId
+      });
+      throw error;
     }
-
-    return result.orderCancel.order;
   }
 
   /**
