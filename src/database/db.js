@@ -24,48 +24,105 @@ class Database {
     return new Promise((resolve, reject) => {
       this.db.serialize(() => {
         try {
-          // Tabela de pedidos existente
-          this.db.run(`
-            CREATE TABLE IF NOT EXISTS orders (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              appmax_id INTEGER UNIQUE,
-              shopify_id TEXT,
-              woocommerce_id TEXT,
-              session_id TEXT,
-              platform TEXT NOT NULL,
-              status TEXT,
-              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-              updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-              metadata TEXT
-            )
-          `);
-
-          // Nova tabela para a fila
-          this.db.run(`
-            CREATE TABLE IF NOT EXISTS request_queue (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              appmax_id INTEGER NOT NULL,
-              event_type TEXT NOT NULL,
-              status TEXT NOT NULL,
-              financial_status TEXT NOT NULL,
-              request_data TEXT NOT NULL,
-              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-              processed_at DATETIME,
-              attempts INTEGER DEFAULT 0,
-              error TEXT,
-              FOREIGN KEY (appmax_id) REFERENCES orders(appmax_id)
-            )
-          `, (err) => {
+          // Verifica se a tabela existe
+          this.db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='orders'", async (err, row) => {
             if (err) {
-              logger.error('Erro ao criar tabela request_queue:', err);
+              logger.error('Erro ao verificar tabela:', err);
               reject(err);
-            } else {
-              logger.info('Tabelas criadas/verificadas com sucesso');
-              resolve();
+              return;
             }
+
+            if (!row) {
+              // Cria a tabela se não existir
+              this.db.run(`
+                CREATE TABLE orders (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  appmax_id INTEGER UNIQUE,
+                  shopify_id TEXT,
+                  woocommerce_id TEXT,
+                  session_id TEXT,
+                  platform TEXT NOT NULL,
+                  status TEXT,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  metadata TEXT
+                )
+              `);
+            } else {
+              // Verifica e adiciona colunas faltantes
+              const columns = await this.getTableColumns('orders');
+              const missingColumns = {
+                woocommerce_id: 'TEXT',
+                session_id: 'TEXT',
+                platform: 'TEXT',
+                metadata: 'TEXT'
+              };
+
+              for (const [column, type] of Object.entries(missingColumns)) {
+                if (!columns.includes(column)) {
+                  try {
+                    await this.addColumn('orders', column, type);
+                    logger.info(`Coluna ${column} adicionada com sucesso`);
+                  } catch (error) {
+                    logger.warn(`Erro ao adicionar coluna ${column}:`, error);
+                  }
+                }
+              }
+            }
+
+            // Nova tabela para a fila
+            this.db.run(`
+              CREATE TABLE IF NOT EXISTS request_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                appmax_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                financial_status TEXT NOT NULL,
+                request_data TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                processed_at DATETIME,
+                attempts INTEGER DEFAULT 0,
+                error TEXT,
+                FOREIGN KEY (appmax_id) REFERENCES orders(appmax_id)
+              )
+            `, (err) => {
+              if (err) {
+                logger.error('Erro ao criar tabela request_queue:', err);
+                reject(err);
+              } else {
+                logger.info('Tabelas criadas/verificadas com sucesso');
+                resolve();
+              }
+            });
           });
         } catch (error) {
           reject(error);
+        }
+      });
+    });
+  }
+
+  // Método auxiliar para obter colunas de uma tabela
+  async getTableColumns(tableName) {
+    return new Promise((resolve, reject) => {
+      this.db.all(`PRAGMA table_info(${tableName})`, (err, rows) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows.map(row => row.name));
+        }
+      });
+    });
+  }
+
+  // Método auxiliar para adicionar coluna
+  async addColumn(tableName, columnName, columnType) {
+    return new Promise((resolve, reject) => {
+      this.db.run(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnType}`, (err) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
         }
       });
     });
@@ -241,6 +298,11 @@ class Database {
       throw new Error('Platform é obrigatório');
     }
 
+    // Garante que temos pelo menos um ID para identificar o pedido
+    if (!appmaxId && !shopifyId && !woocommerceId && !sessionId) {
+      throw new Error('Pelo menos um ID (appmax, shopify, woocommerce ou session) é obrigatório');
+    }
+
     const metadataStr = JSON.stringify(metadata);
 
     return new Promise((resolve, reject) => {
@@ -256,46 +318,91 @@ class Database {
       findExisting().then(existingOrder => {
         if (existingOrder) {
           // Atualiza o pedido existente
-          this.db.run(
-            `UPDATE orders 
-             SET appmax_id = COALESCE(?, appmax_id),
-                 shopify_id = COALESCE(?, shopify_id),
-                 woocommerce_id = COALESCE(?, woocommerce_id),
-                 session_id = COALESCE(?, session_id),
-                 platform = ?,
-                 status = ?,
-                 metadata = ?,
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = ?`,
-            [appmaxId, shopifyId, woocommerceId, sessionId, platform, status, metadataStr, existingOrder.id],
-            (err) => {
-              if (err) {
-                logger.error('Erro ao atualizar pedido:', err);
-                reject(err);
-              } else {
-                logger.info(`Pedido atualizado: ID ${existingOrder.id}`);
-                resolve(existingOrder.id);
-              }
+          const updateFields = [];
+          const updateValues = [];
+
+          // Adiciona campos apenas se tiverem valor
+          if (appmaxId) {
+            updateFields.push('appmax_id = ?');
+            updateValues.push(appmaxId);
+          }
+          if (shopifyId) {
+            updateFields.push('shopify_id = ?');
+            updateValues.push(shopifyId);
+          }
+          if (woocommerceId) {
+            updateFields.push('woocommerce_id = ?');
+            updateValues.push(woocommerceId);
+          }
+          if (sessionId) {
+            updateFields.push('session_id = ?');
+            updateValues.push(sessionId);
+          }
+
+          updateFields.push('platform = ?');
+          updateFields.push('status = ?');
+          updateFields.push('metadata = ?');
+          updateFields.push('updated_at = CURRENT_TIMESTAMP');
+          updateValues.push(platform, status, metadataStr);
+
+          const query = `
+            UPDATE orders 
+            SET ${updateFields.join(', ')}
+            WHERE id = ?
+          `;
+          updateValues.push(existingOrder.id);
+
+          this.db.run(query, updateValues, (err) => {
+            if (err) {
+              logger.error('Erro ao atualizar pedido:', err);
+              reject(err);
+            } else {
+              logger.info(`Pedido atualizado: ID ${existingOrder.id}`);
+              resolve(existingOrder.id);
             }
-          );
+          });
         } else {
-          // Insere novo pedido
-          this.db.run(
-            `INSERT INTO orders (
-              appmax_id, shopify_id, woocommerce_id, session_id,
-              platform, status, metadata
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [appmaxId, shopifyId, woocommerceId, sessionId, platform, status, metadataStr],
-            function(err) {
-              if (err) {
-                logger.error('Erro ao inserir novo pedido:', err);
-                reject(err);
-              } else {
-                logger.info(`Novo pedido inserido: ID ${this.lastID}`);
-                resolve(this.lastID);
-              }
+          // Prepara campos e valores para inserção
+          const fields = ['platform', 'status', 'metadata'];
+          const values = [platform, status, metadataStr];
+          const placeholders = ['?', '?', '?'];
+
+          // Adiciona campos opcionais apenas se tiverem valor
+          if (appmaxId) {
+            fields.push('appmax_id');
+            values.push(appmaxId);
+            placeholders.push('?');
+          }
+          if (shopifyId) {
+            fields.push('shopify_id');
+            values.push(shopifyId);
+            placeholders.push('?');
+          }
+          if (woocommerceId) {
+            fields.push('woocommerce_id');
+            values.push(woocommerceId);
+            placeholders.push('?');
+          }
+          if (sessionId) {
+            fields.push('session_id');
+            values.push(sessionId);
+            placeholders.push('?');
+          }
+
+          const query = `
+            INSERT INTO orders (${fields.join(', ')})
+            VALUES (${placeholders.join(', ')})
+          `;
+
+          this.db.run(query, values, function(err) {
+            if (err) {
+              logger.error('Erro ao inserir novo pedido:', err);
+              reject(err);
+            } else {
+              logger.info(`Novo pedido inserido: ID ${this.lastID}`);
+              resolve(this.lastID);
             }
-          );
+          });
         }
       }).catch(reject);
     });
