@@ -500,62 +500,76 @@ class Database {
    * @returns {Promise<void>}
    */
   async updateOrderIds(appmaxId, { woocommerce_id, shopify_id, session_id }) {
-    const db = await this.getConnection();
-    
-    try {
-      // Prepara os campos e valores para atualização
-      const updates = [];
-      const values = [];
-      
-      if (woocommerce_id !== undefined) {
-        updates.push('woocommerce_id = ?');
-        values.push(woocommerce_id);
+    return new Promise((resolve, reject) => {
+      try {
+        // Prepara os campos e valores para atualização
+        const updates = [];
+        const values = [];
+        
+        if (woocommerce_id !== undefined) {
+          updates.push('woocommerce_id = ?');
+          values.push(woocommerce_id);
+        }
+        
+        if (shopify_id !== undefined) {
+          updates.push('shopify_id = ?');
+          values.push(shopify_id);
+        }
+        
+        if (session_id !== undefined) {
+          updates.push('session_id = ?');
+          values.push(session_id);
+        }
+        
+        // Se não houver campos para atualizar, retorna
+        if (updates.length === 0) {
+          resolve();
+          return;
+        }
+        
+        // Adiciona o appmaxId aos valores
+        values.push(appmaxId);
+        
+        // Monta e executa a query
+        const query = `
+          UPDATE orders 
+          SET ${updates.join(', ')},
+              updated_at = CURRENT_TIMESTAMP
+          WHERE appmax_id = ?
+        `;
+        
+        this.db.run(query, values, (err) => {
+          if (err) {
+            logger.error('Erro ao atualizar IDs no banco:', {
+              error: err.message,
+              appmax_id: appmaxId,
+              ids: { woocommerce_id, shopify_id, session_id }
+            });
+            reject(err);
+            return;
+          }
+
+          logger.info('IDs atualizados no banco:', {
+            appmax_id: appmaxId,
+            woocommerce_id,
+            shopify_id,
+            session_id,
+            query,
+            values
+          });
+          
+          resolve();
+        });
+        
+      } catch (error) {
+        logger.error('Erro ao atualizar IDs no banco:', {
+          error: error.message,
+          appmax_id: appmaxId,
+          ids: { woocommerce_id, shopify_id, session_id }
+        });
+        reject(error);
       }
-      
-      if (shopify_id !== undefined) {
-        updates.push('shopify_id = ?');
-        values.push(shopify_id);
-      }
-      
-      if (session_id !== undefined) {
-        updates.push('session_id = ?');
-        values.push(session_id);
-      }
-      
-      // Se não houver campos para atualizar, retorna
-      if (updates.length === 0) {
-        return;
-      }
-      
-      // Adiciona o appmaxId aos valores
-      values.push(appmaxId);
-      
-      // Monta e executa a query
-      const query = `
-        UPDATE orders 
-        SET ${updates.join(', ')}
-        WHERE appmax_id = ?
-      `;
-      
-      await db.run(query, values);
-      
-      logger.info('IDs atualizados no banco:', {
-        appmax_id: appmaxId,
-        woocommerce_id,
-        shopify_id,
-        session_id,
-        query,
-        values
-      });
-      
-    } catch (error) {
-      logger.error('Erro ao atualizar IDs no banco:', {
-        error: error.message,
-        appmax_id: appmaxId,
-        ids: { woocommerce_id, shopify_id, session_id }
-      });
-      throw error;
-    }
+    });
   }
 }
 
