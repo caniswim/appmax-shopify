@@ -83,6 +83,32 @@ class WebhookController {
     return email.replace(/^email_/, '');
   }
 
+  /**
+   * Normaliza o formato do telefone para o padrão aceito pela Shopify
+   * Remove caracteres especiais e mantém apenas números
+   * Adiciona código do país se necessário
+   */
+  normalizePhoneForShopify(phone) {
+    if (!phone) return null;
+    
+    // Remove todos os caracteres não numéricos
+    let normalized = phone.replace(/\D/g, '');
+    
+    // Se o número já começar com 55, não adiciona novamente
+    if (!normalized.startsWith('55')) {
+      normalized = `55${normalized}`;
+    }
+    
+    // Garante que o número tem pelo menos 8 dígitos (sem contar código do país)
+    if (normalized.length < 10) {
+      logger.warn('Número de telefone muito curto:', { original: phone, normalized });
+      return null;
+    }
+    
+    // Formata como +55XXXXXXXXXX
+    return `+${normalized}`;
+  }
+
   async handleWebhook(req, res, next) {
     try {
       // Log da requisição completa
@@ -215,20 +241,32 @@ class WebhookController {
         normalized: true
       });
 
-      // Modifica o email no objeto antes de enviar para Shopify
+      // Modifica o email e normaliza o telefone antes de enviar para Shopify
+      const normalizedPhone = this.normalizePhoneForShopify(orderData.customer.telephone);
       const shopifyOrderData = {
         ...orderData,
         customer: {
           ...orderData.customer,
-          email: this.formatEmailForShopify(orderData.customer.email)
+          email: this.formatEmailForShopify(orderData.customer.email),
+          telephone: normalizedPhone,
+          phone: normalizedPhone
         }
       };
+
+      // Atualiza também o telefone nos endereços
+      if (shopifyOrderData.shipping_address) {
+        shopifyOrderData.shipping_address.phone = normalizedPhone;
+      }
+      if (shopifyOrderData.billing_address) {
+        shopifyOrderData.billing_address.phone = normalizedPhone;
+      }
 
       // Log antes de enviar para Shopify
       logger.info('Enviando dados para Shopify:', {
         orderId: orderData.id,
         email: shopifyOrderData.customer.email,
-        hasPhone: !!shopifyOrderData.customer.telephone,
+        originalPhone: orderData.customer.telephone,
+        normalizedPhone,
         status,
         financialStatus
       });
