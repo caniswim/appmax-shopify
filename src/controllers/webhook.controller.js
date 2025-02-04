@@ -4,6 +4,14 @@ const AppError = require('../utils/AppError');
 const db = require('../database/db');
 
 class WebhookController {
+  // Lista de eventos que devem ser ignorados
+  ignoredEvents = [
+    'CustomerInterested',
+    'CustomerCreated',
+    'CustomerUpdated',
+    'CustomerDeleted'
+  ];
+
   /**
    * Verifica se os dados do pedido estão completos e válidos
    */
@@ -126,14 +134,20 @@ class WebhookController {
         throw new AppError('Dados do webhook inválidos', 400);
       }
 
-      // Ignora o evento CustomerInterested
-      if (event === 'CustomerInterested') {
+      // Verifica se o evento deve ser ignorado
+      if (this.ignoredEvents.includes(event)) {
         logger.info(`Ignorando evento ${event}`, {
           orderId: data.id || 'N/A',
           session_id,
+          event,
+          customer: data.fullname || `${data.firstname || ''} ${data.lastname || ''}`.trim() || 'N/A',
           timestamp: new Date().toISOString()
         });
-        return res.status(200).json({ success: true, message: 'Evento ignorado' });
+        return res.status(200).json({ 
+          success: true, 
+          message: `Evento ${event} ignorado`,
+          ignored: true
+        });
       }
 
       // Caso os dados do pedido estejam aninhados em "order", utiliza-os; caso contrário, usa o objeto data
