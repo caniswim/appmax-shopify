@@ -114,16 +114,10 @@ class WebhookController {
       }
 
       // Salva ou atualiza o pedido no banco local
-      await db.saveOrder({
-        appmaxId: orderData.id,
-        sessionId: session_id,
-        platform: 'appmax',
-        status,
-        metadata: {
-          ...metadata,
-          event,
-          financial_status: financialStatus
-        }
+      await db.saveAppmaxOrder(orderData.id, status, {
+        ...metadata,
+        event,
+        financial_status: financialStatus
       });
 
       // Modifica o email no objeto antes de enviar para Shopify

@@ -152,12 +152,13 @@ class Database {
   async saveOrderMapping(appmaxId, shopifyId) {
     return new Promise((resolve, reject) => {
       this.db.run(
-        `INSERT INTO orders (appmax_id, shopify_id) 
-         VALUES (?, ?)
+        `INSERT INTO orders (appmax_id, shopify_id, platform) 
+         VALUES (?, ?, ?)
          ON CONFLICT(appmax_id) DO UPDATE SET 
          shopify_id = excluded.shopify_id,
+         platform = excluded.platform,
          updated_at = CURRENT_TIMESTAMP`,
-        [appmaxId, shopifyId],
+        [appmaxId, shopifyId, 'shopify'],
         (err) => {
           if (err) {
             logger.error('Erro ao salvar mapeamento de pedido:', err);
@@ -458,6 +459,31 @@ class Database {
           })));
         }
       });
+    });
+  }
+
+  async saveShopifyOrder(appmaxId, shopifyId, status = 'pending', metadata = {}) {
+    return this.saveOrder({
+      appmaxId,
+      shopifyId,
+      platform: 'shopify',
+      status,
+      metadata: {
+        ...metadata,
+        integration_type: 'shopify'
+      }
+    });
+  }
+
+  async saveAppmaxOrder(appmaxId, status = 'pending', metadata = {}) {
+    return this.saveOrder({
+      appmaxId,
+      platform: 'appmax',
+      status,
+      metadata: {
+        ...metadata,
+        integration_type: 'appmax'
+      }
     });
   }
 }
