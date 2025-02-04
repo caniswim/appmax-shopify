@@ -35,16 +35,17 @@ class Database {
             if (!row) {
               // Cria a tabela se não existir
               this.db.run(`
-                CREATE TABLE IF NOT EXISTS orders (
+                CREATE TABLE orders (
                   id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  appmax_id TEXT UNIQUE NOT NULL,
-                  woocommerce_id TEXT,
+                  appmax_id INTEGER UNIQUE,
                   shopify_id TEXT,
+                  woocommerce_id TEXT,
                   session_id TEXT,
+                  platform TEXT NOT NULL,
                   status TEXT,
-                  metadata TEXT,
                   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  metadata TEXT
                 )
               `);
             } else {
@@ -490,6 +491,71 @@ class Database {
         integration_type: 'appmax'
       }
     });
+  }
+
+  /**
+   * Atualiza os IDs relacionados a um pedido Appmax
+   * @param {string} appmaxId - ID do pedido na Appmax
+   * @param {Object} ids - Objeto com os IDs a serem atualizados
+   * @returns {Promise<void>}
+   */
+  async updateOrderIds(appmaxId, { woocommerce_id, shopify_id, session_id }) {
+    const db = await this.getConnection();
+    
+    try {
+      // Prepara os campos e valores para atualização
+      const updates = [];
+      const values = [];
+      
+      if (woocommerce_id !== undefined) {
+        updates.push('woocommerce_id = ?');
+        values.push(woocommerce_id);
+      }
+      
+      if (shopify_id !== undefined) {
+        updates.push('shopify_id = ?');
+        values.push(shopify_id);
+      }
+      
+      if (session_id !== undefined) {
+        updates.push('session_id = ?');
+        values.push(session_id);
+      }
+      
+      // Se não houver campos para atualizar, retorna
+      if (updates.length === 0) {
+        return;
+      }
+      
+      // Adiciona o appmaxId aos valores
+      values.push(appmaxId);
+      
+      // Monta e executa a query
+      const query = `
+        UPDATE orders 
+        SET ${updates.join(', ')}
+        WHERE appmax_id = ?
+      `;
+      
+      await db.run(query, values);
+      
+      logger.info('IDs atualizados no banco:', {
+        appmax_id: appmaxId,
+        woocommerce_id,
+        shopify_id,
+        session_id,
+        query,
+        values
+      });
+      
+    } catch (error) {
+      logger.error('Erro ao atualizar IDs no banco:', {
+        error: error.message,
+        appmax_id: appmaxId,
+        ids: { woocommerce_id, shopify_id, session_id }
+      });
+      throw error;
+    }
   }
 }
 

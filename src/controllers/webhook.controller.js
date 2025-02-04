@@ -117,57 +117,6 @@ class WebhookController {
     return `+${normalized}`;
   }
 
-  /**
-   * Atualiza os IDs relacionados a um pedido Appmax
-   */
-  async updateOrderIds(data) {
-    try {
-      const { appmax_order_id, woocommerce_order_id, shopify_order_id, session_id } = data;
-
-      if (!appmax_order_id) {
-        throw new AppError('ID do pedido Appmax é obrigatório', 400);
-      }
-
-      // Log dos dados recebidos
-      logger.info('Atualizando IDs do pedido:', {
-        appmax_order_id,
-        woocommerce_order_id: woocommerce_order_id || 'não informado',
-        shopify_order_id: shopify_order_id || 'não informado',
-        session_id: session_id || 'não informado'
-      });
-
-      // Prepara os campos para atualização
-      const updateFields = {};
-      if (woocommerce_order_id) updateFields.woocommerce_id = woocommerce_order_id;
-      if (shopify_order_id) updateFields.shopify_id = shopify_order_id;
-      if (session_id) updateFields.session_id = session_id;
-
-      // Atualiza no banco de dados
-      const query = `
-        UPDATE orders 
-        SET ${Object.keys(updateFields).map(field => `${field} = ?`).join(', ')}
-        WHERE appmax_id = ?
-      `;
-
-      const values = [...Object.values(updateFields), appmax_order_id];
-      
-      await db.run(query, values);
-
-      logger.info('IDs atualizados com sucesso:', {
-        appmax_order_id,
-        fields: Object.keys(updateFields)
-      });
-
-      return true;
-    } catch (error) {
-      logger.error('Erro ao atualizar IDs do pedido:', {
-        error: error.message,
-        data
-      });
-      throw error;
-    }
-  }
-
   async handleWebhook(req, res, next) {
     try {
       // Log da requisição completa
@@ -178,18 +127,8 @@ class WebhookController {
         timestamp: new Date().toISOString()
       });
 
-      const { event, data } = req.body;
-
-      // Verifica se é uma atualização de IDs
-      if (data && data.appmax_order_id) {
-        await this.updateOrderIds(data);
-        return res.status(200).json({
-          success: true,
-          message: 'IDs atualizados com sucesso'
-        });
-      }
-
-      // Continua com o processamento normal do webhook
+      // Extrai o evento e os dados do webhook
+      const { event, data, session_id } = req.body;
       if (!event || !data) {
         logger.warn('Dados do webhook inválidos:', { body: req.body });
         throw new AppError('Dados do webhook inválidos', 400);
@@ -199,6 +138,7 @@ class WebhookController {
       if (this.ignoredEvents.includes(event)) {
         logger.info(`Ignorando evento ${event}`, {
           orderId: data.id || 'N/A',
+          session_id,
           event,
           customer: data.fullname || `${data.firstname || ''} ${data.lastname || ''}`.trim() || 'N/A',
           timestamp: new Date().toISOString()
@@ -393,6 +333,73 @@ class WebhookController {
         return next(error);
       }
       next(new AppError('Erro interno ao processar webhook', 500));
+    }
+  }
+
+  /**
+   * Atualiza os IDs relacionados a um pedido Appmax
+   */
+  async handleOrderIdsUpdate(req, res, next) {
+    try {
+      const { data } = req.body;
+
+      // Valida dados obrigatórios
+      if (!data || !data.appmax_order_id) {
+        throw new AppError('ID do pedido Appmax é obrigatório', 400);
+      }
+
+      // Log da requisição
+      logger.info('Atualizando IDs do pedido:', {
+        appmax_id: data.appmax_order_id,
+        woocommerce_id: data.woocommerce_order_id,
+        shopify_id: data.shopify_order_id,
+        session_id: data.session_id,
+        timestamp: new Date().toISOString()
+      });
+
+      // Prepara os dados para atualização
+      const updateData = {
+        woocommerce_id: data.woocommerce_order_id || null,
+        shopify_id: data.shopify_order_id || null,
+        session_id: data.session_id || null
+      };
+
+      // Atualiza os IDs no banco
+      await db.updateOrderIds(data.appmax_order_id, updateData);
+
+      // Log de sucesso
+      logger.info('IDs atualizados com sucesso:', {
+        appmax_id: data.appmax_order_id,
+        ...updateData,
+        timestamp: new Date().toISOString()
+      });
+
+      res.status(200).json({
+        success: true,
+        message: 'IDs atualizados com sucesso',
+        order_id: data.appmax_order_id
+      });
+
+    } catch (error) {
+      // Log detalhado de erro
+      logger.error('Erro ao atualizar IDs:', {
+        error: {
+          message: error.message,
+          stack: error.stack,
+          code: error.statusCode || 500
+        },
+        request: {
+          body: req.body,
+          headers: req.headers,
+          ip: req.ip
+        },
+        timestamp: new Date().toISOString()
+      });
+
+      if (error instanceof AppError) {
+        return next(error);
+      }
+      next(new AppError('Erro interno ao atualizar IDs', 500));
     }
   }
 }
